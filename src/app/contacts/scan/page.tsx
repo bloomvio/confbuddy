@@ -1,0 +1,189 @@
+'use client'
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import BadgeCapture from '@/components/badge-capture/BadgeCapture'
+import { Contact } from '@/types/database'
+import { createClient } from '@/lib/supabase/client'
+
+type Stage = 'capture' | 'enriching' | 'review'
+
+export default function ScanPage() {
+  const [stage, setStage]       = useState<Stage>('capture')
+  const [contact, setContact]   = useState<Partial<Contact> | null>(null)
+  const [enriched, setEnriched] = useState<Partial<Contact> | null>(null)
+  const [saving, setSaving]     = useState(false)
+  const [saveError, setSaveError] = useState('')
+  const [eventName, setEventName] = useState('')
+  const router = useRouter()
+  const supabase = createClient()
+
+  async function handleCapture(parsed: Partial<Contact>) {
+    setContact(parsed)
+    setStage('enriching')
+    try {
+      const res = await fetch('/api/enrich', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: parsed.full_name, company: parsed.company, email: parsed.email }),
+      })
+      const data = await res.json()
+      setEnriched({ ...parsed, ...data.enriched })
+    } catch {
+      setEnriched(parsed)
+    }
+    setStage('review')
+  }
+
+  async function handleSave() {
+    const finalContact = enriched ?? contact
+    if (!finalContact) return
+
+    if (!finalContact.full_name?.trim()) {
+      setSaveError('Name is required — please fill it in before saving.')
+      return
+    }
+
+    setSaving(true)
+    setSaveError('')
+
+    // Always get a fresh session before writing
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      router.push('/auth/login')
+      return
+    }
+
+    const { data, error } = await supabase
+      .from('cb_contacts')
+      .insert({
+        ...finalContact,
+        user_id: user.id,                            // REQUIRED — no default in DB
+        event_name: eventName.trim() || null,
+      })
+      .select()
+      .single()
+
+    setSaving(false)
+
+    if (error) {
+      console.error('Contact save error:', error)
+      setSaveError(`Save failed: ${error.message}`)
+      return
+    }
+
+    if (data) router.push(`/contacts/${data.id}`)
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <header className="bg-white border-b border-gray-100 px-4 py-4 flex items-center gap-3">
+        <button onClick={() => router.back()} className="text-gray-500">←</button>
+        <h1 className="font-semibold text-gray-900">
+          {stage === 'capture'   ? 'Scan Badge' :
+           stage === 'enriching' ? 'Enriching Profile...' :
+           'Review Contact'}
+        </h1>
+      </header>
+
+      <div className="px-4 py-6 max-w-lg mx-auto">
+
+        {/* Event name input — visible from the start */}
+        <div className="card mb-4 space-y-1">
+          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">📍 Conference / Event</label>
+          <input
+            className="input text-sm"
+            placeholder="e.g. Salesforce World Tour 2026"
+            value={eventName}
+            onChange={e => setEventName(e.target.value)}
+          />
+        </div>
+
+        {stage === 'capture' && <BadgeCapture onCapture={handleCapture} />}
+
+        {stage === 'enriching' && (
+          <div className="card text-center py-12 space-y-4">
+            <div className="text-4xl animate-bounce">🔍</div>
+            <h2 className="font-semibold text-gray-900">Looking up {contact?.full_name}</h2>
+            <div className="space-y-2 text-sm text-gray-500">
+              <p>✓ Badge captured</p>
+              <p className="animate-pulse">⟳ Checking LinkedIn &amp; Apollo...</p>
+              <p className="text-gray-300">⟳ Matching CRM data...</p>
+            </div>
+          </div>
+        )}
+
+        {stage === 'review' && enriched && (
+          <div className="space-y-4">
+            {/* Contact header */}
+            <div className="card flex items-center gap-4">
+              <div className="w-14 h-14 bg-indigo-100 rounded-full flex items-center justify-center text-2xl font-bold text-indigo-600">
+                {enriched.full_name?.[0] ?? '?'}
+              </div>
+              <div>
+                <h2 className="font-bold text-lg">{enriched.full_name}</h2>
+                <p className="text-gray-500 text-sm">{enriched.title}</p>
+                <p className="text-gray-500 text-sm">{enriched.company}</p>
+              </div>
+            </div>
+
+            {/* CRM context */}
+            {enriched.crm_relationship !== 'unknown' && (
+              <div className="card bg-indigo-50 border-indigo-100">
+                <p className="text-xs font-semibold text-indigo-400 uppercase tracking-wide mb-2">CRM Context</p>
+                <div className="flex gap-2 mb-2">
+                  <span className={`badge-${enriched.crm_relationship}`}>{enriched.crm_relationship}</span>
+                  {enriched.crm_temperature && enriched.crm_temperature !== 'unknown' && (
+                    <span className={`badge-${enriched.crm_temperature}`}>{enriched.crm_temperature}</span>
+                  )}
+                </div>
+                {enriched.crm_notes && <p className="text-sm text-gray-600">{enriched.crm_notes}</p>}
+              </div>
+            )}
+
+            {/* Company summary */}
+            {enriched.company_summary && (
+              <div className="card">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Company Intel</p>
+                <p className="text-sm text-gray-600">{enriched.company_summary}</p>
+              </div>
+            )}
+
+            {/* Systems landscape */}
+            {enriched.systems_landscape && (
+              <div className="card">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Systems &amp; Tools</p>
+                <div className="flex flex-wrap gap-1">
+                  {(enriched.systems_landscape as string[]).map((tool: string) => (
+                    <span key={tool} className="bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded-full">{tool}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {saveError && (
+              <div className="bg-red-50 text-red-600 text-sm rounded-xl p-3">{saveError}</div>
+            )}
+
+            <button onClick={handleSave} disabled={saving} className="btn-primary w-full">
+              {saving ? 'Saving...' : '✓ Save Contact'}
+            </button>
+
+            <button
+              onClick={() => {
+                if (enriched.company) {
+                  handleSave().then(() => {
+                    // After save navigates to contact, user can tap Meet from there
+                  })
+                }
+              }}
+              disabled={saving}
+              className="btn-secondary w-full"
+            >
+              {saving ? 'Saving...' : '🎙️ Save & Start Meeting'}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
