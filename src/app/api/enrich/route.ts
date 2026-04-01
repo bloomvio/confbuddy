@@ -69,7 +69,9 @@ Return JSON only:
       companySummary = parsed.company_summary
       systemsLandscape = parsed.systems_landscape
     }
-  } catch {}
+  } catch (e) {
+    console.error('Claude enrichment failed:', e)
+  }
 
   // 4. Build enriched contact
   const enriched: Record<string, unknown> = {

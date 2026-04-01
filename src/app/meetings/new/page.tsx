@@ -1,11 +1,11 @@
 'use client'
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 
 type RecordingState = 'idle' | 'recording' | 'paused' | 'done'
 
-export default function NewMeetingPage() {
+function NewMeetingContent() {
   const [recordingState, setRecordingState] = useState<RecordingState>('idle')
   const [typedNotes, setTypedNotes] = useState('')
   const [duration, setDuration] = useState(0)
@@ -184,5 +184,13 @@ export default function NewMeetingPage() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function NewMeetingPage() {
+  return (
+    <Suspense>
+      <NewMeetingContent />
+    </Suspense>
   )
 }

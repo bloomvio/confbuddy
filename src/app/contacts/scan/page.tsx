@@ -34,13 +34,13 @@ export default function ScanPage() {
     setStage('review')
   }
 
-  async function handleSave() {
+  async function doSave() {
     const finalContact = enriched ?? contact
-    if (!finalContact) return
+    if (!finalContact) return null
 
     if (!finalContact.full_name?.trim()) {
       setSaveError('Name is required — please fill it in before saving.')
-      return
+      return null
     }
 
     setSaving(true)
@@ -50,7 +50,7 @@ export default function ScanPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
       router.push('/auth/login')
-      return
+      return null
     }
 
     const { data, error } = await supabase
@@ -68,9 +68,14 @@ export default function ScanPage() {
     if (error) {
       console.error('Contact save error:', error)
       setSaveError(`Save failed: ${error.message}`)
-      return
+      return null
     }
 
+    return data ?? null
+  }
+
+  async function handleSave() {
+    const data = await doSave()
     if (data) router.push(`/contacts/${data.id}`)
   }
 
@@ -169,12 +174,9 @@ export default function ScanPage() {
             </button>
 
             <button
-              onClick={() => {
-                if (enriched.company) {
-                  handleSave().then(() => {
-                    // After save navigates to contact, user can tap Meet from there
-                  })
-                }
+              onClick={async () => {
+                const data = await doSave()
+                if (data) router.push(`/meetings/new?contact_id=${data.id}&contact_name=${encodeURIComponent(data.full_name ?? '')}`)
               }}
               disabled={saving}
               className="btn-secondary w-full"
