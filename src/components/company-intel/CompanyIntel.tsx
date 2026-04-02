@@ -20,7 +20,47 @@ interface OpportunityEntry {
   angle: string
 }
 
-interface OurAccount {
+interface Financials {
+  revenue_estimate?: string
+  arr_estimate?: string
+  growth_rate?: string
+  funding?: string
+  valuation?: string
+  gross_margin?: string
+}
+
+// New structured format from company-intel API
+interface InternalBrief {
+  account_status?: string
+  temperature?: string
+  arr?: string
+  contract_value?: string
+  products_in_use?: string[]
+  account_owner?: string
+  last_contact?: string
+  renewal_date?: string
+  outstanding_invoices?: number
+  outstanding_amount?: string
+  open_issues?: string[]
+  health?: string
+  crm_notes?: string
+  relationship_history?: string | null
+  doc_highlights?: string | null
+}
+
+interface PublicBrief {
+  financials?: Financials
+  leadership?: LeadershipEntry[]
+  strategic_priorities?: string[]
+  growth_signals?: string[]
+  pain_points?: string[]
+  tech_stack?: string[]
+  recent_news?: NewsEntry[]
+  competitive_context?: string
+}
+
+// Legacy format (for backward compat with cached intel)
+interface LegacyAccount {
   status?: string
   temperature?: string
   arr?: string
@@ -36,15 +76,6 @@ interface OurAccount {
   notes?: string
 }
 
-interface Financials {
-  revenue_estimate?: string
-  arr_estimate?: string
-  growth_rate?: string
-  funding?: string
-  valuation?: string
-  gross_margin?: string
-}
-
 export interface CompanyIntelData {
   snapshot?: string
   industry?: string
@@ -52,17 +83,15 @@ export interface CompanyIntelData {
   founded?: string
   size?: string
   public_or_private?: string
+  // New structured format
+  internal_brief?: InternalBrief
+  public_brief?: PublicBrief
+  // Legacy top-level fields (backward compat)
   financials?: Financials
-  our_account?: OurAccount
-  leadership?: LeadershipEntry[]
-  strategic_priorities?: string[]
-  growth_signals?: string[]
-  pain_points?: string[]
-  tech_stack?: string[]
-  recent_news?: NewsEntry[]
-  competitive_context?: string
-  opportunities?: OpportunityEntry[]
+  our_account?: LegacyAccount
+  // Shared fields
   talking_points?: string[]
+  opportunities?: OpportunityEntry[]
   risks?: string[]
 }
 
@@ -75,11 +104,15 @@ interface Props {
 
 // ── Tiny helpers ──────────────────────────────────────────────────────────────
 
-function SectionHeader({ icon, label }: { icon: string; label: string }) {
+function SectionHeader({ icon, label, sub }: { icon: string; label: string; sub?: string }) {
   return (
-    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 flex items-center gap-1">
-      <span>{icon}</span> {label}
-    </p>
+    <div className="flex items-center gap-2 mb-3">
+      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide flex items-center gap-1">
+        <span>{icon}</span> {label}
+      </p>
+      {sub && <span className="text-xs text-gray-300">·</span>}
+      {sub && <span className="text-xs text-gray-400 normal-case font-normal">{sub}</span>}
+    </div>
   )
 }
 
@@ -92,13 +125,14 @@ function Bullet({ text }: { text: string }) {
   )
 }
 
-function Chip({ text, color = 'gray' }: { text: string; color?: 'gray' | 'indigo' | 'green' | 'amber' | 'red' }) {
+function Chip({ text, color = 'gray' }: { text: string; color?: 'gray' | 'indigo' | 'green' | 'amber' | 'red' | 'purple' }) {
   const cls = {
     gray:   'bg-gray-100 text-gray-600',
     indigo: 'bg-indigo-100 text-indigo-700',
     green:  'bg-green-100 text-green-700',
     amber:  'bg-amber-100 text-amber-700',
     red:    'bg-red-100 text-red-600',
+    purple: 'bg-purple-100 text-purple-700',
   }[color]
   return <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${cls}`}>{text}</span>
 }
@@ -119,6 +153,20 @@ function tempColor(t?: string): 'red' | 'amber' | 'indigo' | 'gray' {
   if (l === 'warm') return 'amber'
   if (l === 'cold') return 'indigo'
   return 'gray'
+}
+
+// ── Section label badge ───────────────────────────────────────────────────────
+
+function SourceBadge({ type }: { type: 'internal' | 'public' }) {
+  return (
+    <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full ${
+      type === 'internal'
+        ? 'bg-indigo-100 text-indigo-600'
+        : 'bg-gray-100 text-gray-500'
+    }`}>
+      {type === 'internal' ? '🏢 Internal' : '🌐 Public'}
+    </span>
+  )
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -186,8 +234,8 @@ export default function CompanyIntel({ company, contactId, initialIntel, autoFet
         <div className="text-4xl animate-pulse">🔍</div>
         <p className="font-medium text-gray-700">Researching {company}...</p>
         <div className="space-y-1 text-sm text-gray-400">
-          <p className="animate-pulse">⟳ Analysing public data &amp; financials</p>
-          <p className="animate-pulse" style={{ animationDelay: '0.3s' }}>⟳ Cross-referencing CRM records</p>
+          <p className="animate-pulse">⟳ Pulling CRM &amp; internal data</p>
+          <p className="animate-pulse" style={{ animationDelay: '0.3s' }}>⟳ Analysing public financials &amp; news</p>
           <p className="animate-pulse" style={{ animationDelay: '0.6s' }}>⟳ Building talking points</p>
         </div>
       </div>
@@ -196,8 +244,39 @@ export default function CompanyIntel({ company, contactId, initialIntel, autoFet
 
   if (!intel) return null
 
-  const acct = intel.our_account
-  const fin  = intel.financials
+  // Normalise — handle both new structured format and legacy flat format
+  const ib: InternalBrief | null =
+    intel.internal_brief ??
+    (intel.our_account ? {
+      account_status:        intel.our_account.status,
+      temperature:           intel.our_account.temperature,
+      arr:                   intel.our_account.arr,
+      contract_value:        intel.our_account.contract_value,
+      products_in_use:       intel.our_account.products_in_use,
+      account_owner:         intel.our_account.account_owner,
+      last_contact:          intel.our_account.last_contact,
+      renewal_date:          intel.our_account.renewal_date,
+      outstanding_invoices:  intel.our_account.outstanding_invoices,
+      outstanding_amount:    intel.our_account.outstanding_amount,
+      open_issues:           intel.our_account.open_issues,
+      health:                intel.our_account.health,
+      crm_notes:             intel.our_account.notes,
+    } : null)
+
+  const pb: PublicBrief | null =
+    intel.public_brief ??
+    (intel.financials ? {
+      financials:          intel.financials,
+      leadership:          intel.leadership ?? undefined,
+      strategic_priorities: intel.strategic_priorities ?? undefined,
+      growth_signals:      intel.growth_signals ?? undefined,
+      pain_points:         intel.pain_points ?? undefined,
+      tech_stack:          intel.tech_stack ?? undefined,
+      recent_news:         intel.recent_news ?? undefined,
+      competitive_context: intel.competitive_context ?? undefined,
+    } : null)
+
+  const fin = pb?.financials
 
   return (
     <div className="space-y-3">
@@ -221,61 +300,77 @@ export default function CompanyIntel({ company, contactId, initialIntel, autoFet
         )}
       </div>
 
-      {/* ── Our Account (CRM) ───────────────────────────────────────────── */}
-      {acct && acct.status !== 'unknown' && (
+      {/* ══════════════════════════════════════════════════════════════════ */}
+      {/* INTERNAL SECTION                                                   */}
+      {/* ══════════════════════════════════════════════════════════════════ */}
+
+      {ib && ib.account_status !== 'unknown' && (
         <div className={`card border-l-4 ${
-          acct.health === 'green' ? 'border-l-green-400' :
-          acct.health === 'red'   ? 'border-l-red-400' :
-          acct.health === 'yellow' || acct.health === 'amber' ? 'border-l-amber-400' :
+          ib.health === 'green'                          ? 'border-l-green-400' :
+          ib.health === 'red'                            ? 'border-l-red-400'   :
+          ib.health === 'yellow' || ib.health === 'amber' ? 'border-l-amber-400' :
           'border-l-indigo-300'
         }`}>
-          <SectionHeader icon="🏢" label="Our Account" />
+          <div className="flex items-center justify-between mb-3">
+            <SectionHeader icon="🏢" label="Account" />
+            <SourceBadge type="internal" />
+          </div>
+
           <div className="flex flex-wrap gap-1 mb-2">
-            {acct.status && <Chip text={acct.status} color={acct.status === 'customer' ? 'green' : acct.status === 'prospect' ? 'indigo' : 'gray'} />}
-            {acct.temperature && <Chip text={acct.temperature} color={tempColor(acct.temperature)} />}
-            {acct.health && acct.health !== 'unknown' && <Chip text={`${acct.health} health`} color={healthColor(acct.health)} />}
+            {ib.account_status && (
+              <Chip
+                text={ib.account_status}
+                color={ib.account_status === 'customer' ? 'green' : ib.account_status === 'prospect' ? 'indigo' : 'gray'}
+              />
+            )}
+            {ib.temperature && <Chip text={ib.temperature} color={tempColor(ib.temperature)} />}
+            {ib.health && ib.health !== 'unknown' && <Chip text={`${ib.health} health`} color={healthColor(ib.health)} />}
           </div>
+
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm mb-2">
-            {acct.arr && (
-              <div><span className="text-xs text-gray-400">ARR</span><p className="font-semibold text-gray-800">{acct.arr}</p></div>
+            {ib.arr && (
+              <div><span className="text-xs text-gray-400">ARR</span><p className="font-semibold text-gray-800">{ib.arr}</p></div>
             )}
-            {acct.contract_value && (
-              <div><span className="text-xs text-gray-400">Contract</span><p className="font-semibold text-gray-800">{acct.contract_value}</p></div>
+            {ib.contract_value && (
+              <div><span className="text-xs text-gray-400">Contract</span><p className="font-semibold text-gray-800">{ib.contract_value}</p></div>
             )}
-            {acct.account_owner && (
-              <div><span className="text-xs text-gray-400">Owner</span><p className="text-gray-700">{acct.account_owner}</p></div>
+            {ib.account_owner && (
+              <div><span className="text-xs text-gray-400">Owner</span><p className="text-gray-700">{ib.account_owner}</p></div>
             )}
-            {acct.last_contact && (
-              <div><span className="text-xs text-gray-400">Last Touch</span><p className="text-gray-700">{acct.last_contact}</p></div>
+            {ib.last_contact && (
+              <div><span className="text-xs text-gray-400">Last Touch</span><p className="text-gray-700">{ib.last_contact}</p></div>
             )}
-            {acct.renewal_date && (
-              <div><span className="text-xs text-gray-400">Renewal</span><p className="font-semibold text-amber-600">{acct.renewal_date}</p></div>
+            {ib.renewal_date && (
+              <div><span className="text-xs text-gray-400">Renewal</span><p className="font-semibold text-amber-600">{ib.renewal_date}</p></div>
             )}
           </div>
-          {acct.products_in_use && acct.products_in_use.length > 0 && (
+
+          {ib.products_in_use && ib.products_in_use.length > 0 && (
             <div className="mb-2">
               <p className="text-xs text-gray-400 mb-1">Products in use</p>
               <div className="flex flex-wrap gap-1">
-                {acct.products_in_use.map(p => <Chip key={p} text={p} color="indigo" />)}
+                {ib.products_in_use.map(p => <Chip key={p} text={p} color="indigo" />)}
               </div>
             </div>
           )}
-          {/* Invoices alert */}
-          {acct.outstanding_invoices != null && acct.outstanding_invoices > 0 && (
+
+          {/* Outstanding invoices alert */}
+          {ib.outstanding_invoices != null && ib.outstanding_invoices > 0 && (
             <div className="flex items-center gap-2 bg-red-50 rounded-lg px-3 py-2 mb-2">
               <span>⚠️</span>
               <p className="text-xs text-red-600 font-medium">
-                {acct.outstanding_invoices} outstanding invoice{acct.outstanding_invoices > 1 ? 's' : ''}
-                {acct.outstanding_amount ? ` · ${acct.outstanding_amount}` : ''}
+                {ib.outstanding_invoices} outstanding invoice{ib.outstanding_invoices > 1 ? 's' : ''}
+                {ib.outstanding_amount ? ` · ${ib.outstanding_amount}` : ''}
               </p>
             </div>
           )}
+
           {/* Open issues */}
-          {acct.open_issues && acct.open_issues.length > 0 && (
+          {ib.open_issues && ib.open_issues.length > 0 && (
             <div className="mb-2">
               <p className="text-xs text-gray-400 mb-1">Open Issues</p>
               <ul className="space-y-0.5">
-                {acct.open_issues.map((issue, i) => (
+                {ib.open_issues.map((issue, i) => (
                   <li key={i} className="text-xs text-gray-600 flex gap-1.5">
                     <span className="text-amber-500">!</span>{issue}
                   </li>
@@ -283,9 +378,32 @@ export default function CompanyIntel({ company, contactId, initialIntel, autoFet
               </ul>
             </div>
           )}
-          {acct.notes && (
-            <p className="text-xs text-gray-500 italic border-t border-gray-100 pt-2 mt-1">{acct.notes}</p>
+
+          {ib.crm_notes && (
+            <p className="text-xs text-gray-500 italic border-t border-gray-100 pt-2 mt-1">{ib.crm_notes}</p>
           )}
+        </div>
+      )}
+
+      {/* Relationship history */}
+      {ib?.relationship_history && (
+        <div className="card border-l-4 border-l-indigo-200">
+          <div className="flex items-center justify-between mb-2">
+            <SectionHeader icon="🕐" label="Meeting History" />
+            <SourceBadge type="internal" />
+          </div>
+          <p className="text-sm text-gray-700 leading-relaxed">{ib.relationship_history}</p>
+        </div>
+      )}
+
+      {/* Doc highlights */}
+      {ib?.doc_highlights && (
+        <div className="card border-l-4 border-l-purple-200">
+          <div className="flex items-center justify-between mb-2">
+            <SectionHeader icon="📄" label="From Conference Docs" />
+            <SourceBadge type="internal" />
+          </div>
+          <p className="text-sm text-gray-700 leading-relaxed">{ib.doc_highlights}</p>
         </div>
       )}
 
@@ -319,48 +437,17 @@ export default function CompanyIntel({ company, contactId, initialIntel, autoFet
         </div>
       )}
 
-      {/* ── Leadership ──────────────────────────────────────────────────── */}
-      {intel.leadership && intel.leadership.length > 0 && (
-        <div className="card">
-          <SectionHeader icon="👔" label="Leadership" />
-          <div className="space-y-3">
-            {intel.leadership.map((l, i) => (
-              <div key={i}>
-                <div className="flex items-baseline gap-2 mb-0.5">
-                  <span className="font-semibold text-sm text-gray-900">{l.name}</span>
-                  <span className="text-xs text-indigo-600 font-medium">{l.role}</span>
-                  {l.since && <span className="text-xs text-gray-400">since {l.since}</span>}
-                </div>
-                {l.background && <p className="text-xs text-gray-500 mb-1">{l.background}</p>}
-                {l.priorities && l.priorities.length > 0 && (
-                  <ul className="space-y-0.5">
-                    {l.priorities.map((p, j) => (
-                      <li key={j} className="text-xs text-gray-600 flex gap-1.5">
-                        <span className="text-indigo-400">▸</span>{p}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ── Strategic Priorities ────────────────────────────────────────── */}
-      {intel.strategic_priorities && intel.strategic_priorities.length > 0 && (
-        <div className="card">
-          <SectionHeader icon="🚀" label="Strategic Priorities" />
-          <ul className="space-y-1">
-            {intel.strategic_priorities.map((p, i) => <Bullet key={i} text={p} />)}
-          </ul>
-        </div>
-      )}
+      {/* ══════════════════════════════════════════════════════════════════ */}
+      {/* PUBLIC SECTION                                                      */}
+      {/* ══════════════════════════════════════════════════════════════════ */}
 
       {/* ── Financials ──────────────────────────────────────────────────── */}
       {fin && (
         <div className="card">
-          <SectionHeader icon="💰" label="Financials" />
+          <div className="flex items-center justify-between mb-3">
+            <SectionHeader icon="💰" label="Financials" />
+            <SourceBadge type="public" />
+          </div>
           <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
             {fin.revenue_estimate && (
               <div><p className="text-xs text-gray-400">Revenue</p><p className="font-semibold text-gray-800">{fin.revenue_estimate}</p></div>
@@ -386,32 +473,85 @@ export default function CompanyIntel({ company, contactId, initialIntel, autoFet
         </div>
       )}
 
-      {/* ── Growth Signals ──────────────────────────────────────────────── */}
-      {intel.growth_signals && intel.growth_signals.length > 0 && (
+      {/* ── Leadership ──────────────────────────────────────────────────── */}
+      {pb?.leadership && pb.leadership.length > 0 && (
         <div className="card">
-          <SectionHeader icon="📈" label="Growth Signals" />
+          <div className="flex items-center justify-between mb-3">
+            <SectionHeader icon="👔" label="Leadership" />
+            <SourceBadge type="public" />
+          </div>
+          <div className="space-y-3">
+            {pb.leadership.map((l, i) => (
+              <div key={i}>
+                <div className="flex items-baseline gap-2 mb-0.5">
+                  <span className="font-semibold text-sm text-gray-900">{l.name}</span>
+                  <span className="text-xs text-indigo-600 font-medium">{l.role}</span>
+                  {l.since && <span className="text-xs text-gray-400">since {l.since}</span>}
+                </div>
+                {l.background && <p className="text-xs text-gray-500 mb-1">{l.background}</p>}
+                {l.priorities && l.priorities.length > 0 && (
+                  <ul className="space-y-0.5">
+                    {l.priorities.map((p, j) => (
+                      <li key={j} className="text-xs text-gray-600 flex gap-1.5">
+                        <span className="text-indigo-400">▸</span>{p}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Strategic Priorities ────────────────────────────────────────── */}
+      {pb?.strategic_priorities && pb.strategic_priorities.length > 0 && (
+        <div className="card">
+          <div className="flex items-center justify-between mb-3">
+            <SectionHeader icon="🚀" label="Strategic Priorities" />
+            <SourceBadge type="public" />
+          </div>
           <ul className="space-y-1">
-            {intel.growth_signals.map((s, i) => <Bullet key={i} text={s} />)}
+            {pb.strategic_priorities.map((p, i) => <Bullet key={i} text={p} />)}
+          </ul>
+        </div>
+      )}
+
+      {/* ── Growth Signals ──────────────────────────────────────────────── */}
+      {pb?.growth_signals && pb.growth_signals.length > 0 && (
+        <div className="card">
+          <div className="flex items-center justify-between mb-3">
+            <SectionHeader icon="📈" label="Growth Signals" />
+            <SourceBadge type="public" />
+          </div>
+          <ul className="space-y-1">
+            {pb.growth_signals.map((s, i) => <Bullet key={i} text={s} />)}
           </ul>
         </div>
       )}
 
       {/* ── Pain Points ─────────────────────────────────────────────────── */}
-      {intel.pain_points && intel.pain_points.length > 0 && (
+      {pb?.pain_points && pb.pain_points.length > 0 && (
         <div className="card">
-          <SectionHeader icon="🩹" label="Pain Points" />
+          <div className="flex items-center justify-between mb-3">
+            <SectionHeader icon="🩹" label="Pain Points" />
+            <SourceBadge type="public" />
+          </div>
           <ul className="space-y-1">
-            {intel.pain_points.map((p, i) => <Bullet key={i} text={p} />)}
+            {pb.pain_points.map((p, i) => <Bullet key={i} text={p} />)}
           </ul>
         </div>
       )}
 
       {/* ── Recent News ─────────────────────────────────────────────────── */}
-      {intel.recent_news && intel.recent_news.length > 0 && (
+      {pb?.recent_news && pb.recent_news.length > 0 && (
         <div className="card">
-          <SectionHeader icon="📰" label="Recent News" />
+          <div className="flex items-center justify-between mb-3">
+            <SectionHeader icon="📰" label="Recent News" />
+            <SourceBadge type="public" />
+          </div>
           <div className="space-y-2">
-            {intel.recent_news.map((n, i) => (
+            {pb.recent_news.map((n, i) => (
               <div key={i} className="border-l-2 border-gray-200 pl-3">
                 <p className="text-sm text-gray-800 font-medium leading-snug">{n.headline}</p>
                 <div className="flex items-center gap-2 mt-0.5">
@@ -425,20 +565,26 @@ export default function CompanyIntel({ company, contactId, initialIntel, autoFet
       )}
 
       {/* ── Tech Stack ──────────────────────────────────────────────────── */}
-      {intel.tech_stack && intel.tech_stack.length > 0 && (
+      {pb?.tech_stack && pb.tech_stack.length > 0 && (
         <div className="card">
-          <SectionHeader icon="🖥️" label="Tech Stack" />
+          <div className="flex items-center justify-between mb-3">
+            <SectionHeader icon="🖥️" label="Tech Stack" />
+            <SourceBadge type="public" />
+          </div>
           <div className="flex flex-wrap gap-1.5">
-            {intel.tech_stack.map(t => <Chip key={t} text={t} color="gray" />)}
+            {pb.tech_stack.map(t => <Chip key={t} text={t} color="gray" />)}
           </div>
         </div>
       )}
 
       {/* ── Competitive Context ─────────────────────────────────────────── */}
-      {intel.competitive_context && (
+      {pb?.competitive_context && (
         <div className="card">
-          <SectionHeader icon="⚔️" label="Competitive Landscape" />
-          <p className="text-sm text-gray-700">{intel.competitive_context}</p>
+          <div className="flex items-center justify-between mb-3">
+            <SectionHeader icon="⚔️" label="Competitive Landscape" />
+            <SourceBadge type="public" />
+          </div>
+          <p className="text-sm text-gray-700">{pb.competitive_context}</p>
         </div>
       )}
 

@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import BadgeCapture from '@/components/badge-capture/BadgeCapture'
 import { Contact } from '@/types/database'
@@ -14,17 +14,28 @@ export default function ScanPage() {
   const [saving, setSaving]     = useState(false)
   const [saveError, setSaveError] = useState('')
   const [eventName, setEventName] = useState('')
-  const router = useRouter()
+  const [activeConf, setActiveConf] = useState<{ id: string; name: string } | null>(null)
+  const router  = useRouter()
   const supabase = createClient()
+
+  // Pick up active conference from localStorage
+  useEffect(() => {
+    const id   = localStorage.getItem('active_conference_id')
+    const name = localStorage.getItem('active_conference_name')
+    if (id && name) {
+      setActiveConf({ id, name })
+      setEventName(name)
+    }
+  }, [])
 
   async function handleCapture(parsed: Partial<Contact>) {
     setContact(parsed)
     setStage('enriching')
     try {
       const res = await fetch('/api/enrich', {
-        method: 'POST',
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: parsed.full_name, company: parsed.company, email: parsed.email }),
+        body:    JSON.stringify({ name: parsed.full_name, company: parsed.company, email: parsed.email }),
       })
       const data = await res.json()
       setEnriched({ ...parsed, ...data.enriched })
@@ -46,19 +57,16 @@ export default function ScanPage() {
     setSaving(true)
     setSaveError('')
 
-    // Always get a fresh session before writing
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      router.push('/auth/login')
-      return null
-    }
+    if (!user) { router.push('/auth/login'); return null }
 
     const { data, error } = await supabase
       .from('cb_contacts')
       .insert({
         ...finalContact,
-        user_id: user.id,                            // REQUIRED — no default in DB
-        event_name: eventName.trim() || null,
+        user_id:       user.id,
+        conference_id: activeConf?.id ?? null,
+        event_name:    eventName.trim() || null,
       })
       .select()
       .single()
@@ -71,12 +79,16 @@ export default function ScanPage() {
       return null
     }
 
+    // Fire intel generation immediately in background
     if (data?.company) {
-      // Fire intel generation immediately in background — cached by the time user opens the contact
       fetch('/api/company-intel', {
-        method: 'POST',
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contact_id: data.id, company: data.company }),
+        body:    JSON.stringify({
+          contact_id:    data.id,
+          company:       data.company,
+          conference_id: activeConf?.id ?? null,
+        }),
       }).catch(() => {})
     }
 
@@ -93,23 +105,36 @@ export default function ScanPage() {
       <header className="bg-white border-b border-gray-100 px-4 py-4 flex items-center gap-3">
         <button onClick={() => router.back()} className="text-gray-500">←</button>
         <h1 className="font-semibold text-gray-900">
-          {stage === 'capture'   ? 'Scan Badge' :
-           stage === 'enriching' ? 'Enriching Profile...' :
+          {stage === 'capture'   ? 'Scan Badge'            :
+           stage === 'enriching' ? 'Enriching Profile...'  :
            'Review Contact'}
         </h1>
       </header>
 
       <div className="px-4 py-6 max-w-lg mx-auto">
-
-        {/* Event name input — visible from the start */}
+        {/* Conference context */}
         <div className="card mb-4 space-y-1">
-          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">📍 Conference / Event</label>
-          <input
-            className="input text-sm"
-            placeholder="e.g. Salesforce World Tour 2026"
-            value={eventName}
-            onChange={e => setEventName(e.target.value)}
-          />
+          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+            {activeConf ? '🎪 Active Conference' : '📍 Conference / Event'}
+          </label>
+          {activeConf ? (
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium text-indigo-700">{activeConf.name}</p>
+              <button
+                onClick={() => { setActiveConf(null); setEventName('') }}
+                className="text-xs text-gray-400 hover:text-gray-600"
+              >
+                Change
+              </button>
+            </div>
+          ) : (
+            <input
+              className="input text-sm"
+              placeholder="e.g. Salesforce World Tour 2026"
+              value={eventName}
+              onChange={e => setEventName(e.target.value)}
+            />
+          )}
         </div>
 
         {stage === 'capture' && <BadgeCapture onCapture={handleCapture} />}
@@ -120,8 +145,8 @@ export default function ScanPage() {
             <h2 className="font-semibold text-gray-900">Looking up {contact?.full_name}</h2>
             <div className="space-y-2 text-sm text-gray-500">
               <p>✓ Badge captured</p>
-              <p className="animate-pulse">⟳ Checking LinkedIn &amp; Apollo...</p>
-              <p className="text-gray-300">⟳ Matching CRM data...</p>
+              <p className="animate-pulse">⟳ Checking CRM &amp; Salesforce...</p>
+              <p className="text-gray-300">⟳ Building profile...</p>
             </div>
           </div>
         )}
@@ -141,7 +166,7 @@ export default function ScanPage() {
             </div>
 
             {/* CRM context */}
-            {enriched.crm_relationship !== 'unknown' && (
+            {enriched.crm_relationship && enriched.crm_relationship !== 'unknown' && (
               <div className="card bg-indigo-50 border-indigo-100">
                 <p className="text-xs font-semibold text-indigo-400 uppercase tracking-wide mb-2">CRM Context</p>
                 <div className="flex gap-2 mb-2">

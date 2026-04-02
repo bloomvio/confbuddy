@@ -1,10 +1,13 @@
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[]
 
-export type CaptureMethod = 'ocr' | 'qr' | 'manual'
-export type CrmRelationship = 'customer' | 'prospect' | 'partner' | 'unknown'
-export type CrmTemperature = 'hot' | 'warm' | 'cold' | 'unknown'
+export type CaptureMethod      = 'ocr' | 'qr' | 'manual'
+export type CrmRelationship    = 'customer' | 'prospect' | 'partner' | 'unknown'
+export type CrmTemperature     = 'hot' | 'warm' | 'cold' | 'unknown'
 export type TranscriptionStatus = 'pending' | 'processing' | 'done' | 'failed'
-export type MeetingStatus = 'recording' | 'processing' | 'notes_ready' | 'exported'
+export type MeetingStatus      = 'recording' | 'processing' | 'notes_ready' | 'exported'
+export type MeetingOutcome     = 'hot' | 'follow_up' | 'not_interested' | 'intro_needed' | 'closed'
+export type DocFileType        = 'attendee_list' | 'crm_export' | 'battlecard' | 'product_sheet' | 'competitor_intel' | 'other'
+export type ConferenceMemberRole = 'owner' | 'member'
 
 export interface Profile {
   id: string
@@ -17,9 +20,62 @@ export interface Profile {
   updated_at: string
 }
 
+export interface Conference {
+  id: string
+  user_id: string
+  name: string
+  location: string | null
+  start_date: string | null
+  end_date: string | null
+  description: string | null
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface ConferenceMember {
+  id: string
+  conference_id: string
+  user_id: string
+  role: ConferenceMemberRole
+  joined_at: string
+}
+
+export interface ConferenceDocument {
+  id: string
+  conference_id: string
+  user_id: string
+  filename: string
+  file_type: DocFileType
+  storage_path: string | null
+  extracted_text: string | null
+  row_count: number | null
+  processed_at: string | null
+  created_at: string
+}
+
+export interface ConferenceAttendee {
+  id: string
+  conference_id: string
+  user_id: string
+  full_name: string | null
+  company: string | null
+  title: string | null
+  email: string | null
+  phone: string | null
+  crm_match_id: string | null
+  sf_match_id: string | null
+  contact_id: string | null
+  is_target: boolean
+  intel_cached: boolean
+  source: string
+  created_at: string
+}
+
 export interface Contact {
   id: string
   user_id: string
+  conference_id: string | null
   full_name: string
   first_name: string | null
   last_name: string | null
@@ -49,6 +105,7 @@ export interface Meeting {
   id: string
   user_id: string
   contact_id: string | null
+  conference_id: string | null
   title: string | null
   meeting_date: string
   location: string | null
@@ -60,6 +117,7 @@ export interface Meeting {
   assemblyai_job_id: string | null
   typed_notes: string | null
   status: MeetingStatus
+  outcome: MeetingOutcome | null
   created_at: string
   updated_at: string
   contact?: Contact

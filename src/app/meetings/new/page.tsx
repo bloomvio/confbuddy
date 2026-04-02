@@ -2,8 +2,17 @@
 import { useState, useRef, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import type { MeetingOutcome } from '@/types/database'
 
 type RecordingState = 'idle' | 'recording' | 'paused' | 'done' | 'processing'
+
+const OUTCOMES: { value: MeetingOutcome; label: string; color: string }[] = [
+  { value: 'hot',            label: '🔥 Hot — move fast',        color: 'bg-red-100 text-red-700 border-red-200'      },
+  { value: 'follow_up',      label: '📅 Follow-up needed',        color: 'bg-blue-100 text-blue-700 border-blue-200'   },
+  { value: 'intro_needed',   label: '🤝 Intro needed',            color: 'bg-purple-100 text-purple-700 border-purple-200' },
+  { value: 'not_interested', label: '👎 Not interested',          color: 'bg-gray-100 text-gray-600 border-gray-200'   },
+  { value: 'closed',         label: '✅ Closed / Done',           color: 'bg-green-100 text-green-700 border-green-200' },
+]
 
 function NewMeetingContent() {
   const [recordingState, setRecordingState] = useState<RecordingState>('idle')
@@ -14,6 +23,8 @@ function NewMeetingContent() {
   const [saveError, setSaveError] = useState('')
   const [contactId, setContactId] = useState<string | null>(null)
   const [contactName, setContactName] = useState('')
+  const [outcome, setOutcome] = useState<MeetingOutcome | null>(null)
+  const [conferenceId, setConferenceId] = useState<string | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -28,6 +39,9 @@ function NewMeetingContent() {
     const cname = params.get('contact_name')
     if (cid) setContactId(cid)
     if (cname) setContactName(decodeURIComponent(cname))
+
+    const confId = localStorage.getItem('active_conference_id')
+    if (confId) setConferenceId(confId)
   }, [params])
 
   async function startRecording() {
@@ -99,17 +113,12 @@ function NewMeetingContent() {
     setRecordingState('recording')
   }
 
-  async function stopAndSave() {
+  async function stopRecording() {
     mediaRecorderRef.current?.stop()
     recognitionRef.current?.stop()
     recognitionRef.current = null
     timerRef.current && clearInterval(timerRef.current)
     setRecordingState('done')
-
-    // Small delay for final chunk + recognition result
-    await new Promise(r => setTimeout(r, 800))
-    const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' })
-    await saveMeeting(audioBlob)
   }
 
   async function saveMeeting(audioBlob?: Blob) {
@@ -135,14 +144,16 @@ function NewMeetingContent() {
     const { data: meeting, error } = await supabase
       .from('cb_meetings')
       .insert({
-        user_id: user.id,
-        contact_id: contactId,
-        meeting_date: new Date().toISOString(),
-        typed_notes: typedNotes || null,
-        recording_url: recordingUrl,
-        transcript_raw: liveTranscript || null,
-        transcription_status: 'done',
-        status: 'processing',
+        user_id:               user.id,
+        contact_id:            contactId,
+        conference_id:         conferenceId,
+        meeting_date:          new Date().toISOString(),
+        typed_notes:           typedNotes || null,
+        recording_url:         recordingUrl,
+        transcript_raw:        liveTranscript || null,
+        transcription_status:  'done',
+        status:                'processing',
+        outcome:               outcome,
       })
       .select()
       .single()
@@ -169,6 +180,18 @@ function NewMeetingContent() {
       router.push(`/meetings/${meeting.id}`)
     }
     setSaving(false)
+  }
+
+  async function stopAndSave() {
+    mediaRecorderRef.current?.stop()
+    recognitionRef.current?.stop()
+    recognitionRef.current = null
+    timerRef.current && clearInterval(timerRef.current)
+    setRecordingState('done')
+    // Small delay for final chunk + recognition result
+    await new Promise(r => setTimeout(r, 800))
+    const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' })
+    await saveMeeting(audioBlob)
   }
 
   const formatTime = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
@@ -205,9 +228,9 @@ function NewMeetingContent() {
             <div className="font-mono text-2xl font-bold text-gray-800">{formatTime(duration)}</div>
           )}
           <p className="text-sm text-gray-500">
-            {recordingState === 'idle' ? 'Tap to start recording the conversation' :
+            {recordingState === 'idle'      ? 'Tap to start recording the conversation' :
              recordingState === 'recording' ? 'Recording in progress...' :
-             recordingState === 'paused' ? 'Recording paused' : 'Recording complete'}
+             recordingState === 'paused'    ? 'Recording paused' : 'Recording complete'}
           </p>
 
           <div className="flex gap-2 justify-center">
@@ -217,13 +240,13 @@ function NewMeetingContent() {
             {recordingState === 'recording' && (
               <>
                 <button onClick={pauseRecording} className="btn-secondary">⏸ Pause</button>
-                <button onClick={stopAndSave} className="btn-primary">⏹ Stop & Save</button>
+                <button onClick={stopRecording} className="btn-primary">⏹ Stop</button>
               </>
             )}
             {recordingState === 'paused' && (
               <>
                 <button onClick={resumeRecording} className="btn-primary">▶ Resume</button>
-                <button onClick={stopAndSave} className="btn-secondary">⏹ Stop & Save</button>
+                <button onClick={stopRecording} className="btn-secondary">⏹ Stop</button>
               </>
             )}
           </div>
@@ -234,6 +257,28 @@ function NewMeetingContent() {
           <div className="card space-y-1">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Live Transcript</p>
             <p className="text-sm text-gray-600 leading-relaxed max-h-32 overflow-y-auto">{transcript}</p>
+          </div>
+        )}
+
+        {/* Outcome selector — shown after recording stops */}
+        {recordingState === 'done' && (
+          <div className="card space-y-3">
+            <p className="text-sm font-semibold text-gray-700">How did it go?</p>
+            <div className="grid grid-cols-1 gap-2">
+              {OUTCOMES.map(o => (
+                <button
+                  key={o.value}
+                  onClick={() => setOutcome(o.value)}
+                  className={`text-left px-3 py-2.5 rounded-xl border text-sm font-medium transition-all ${
+                    outcome === o.value
+                      ? o.color + ' border-2'
+                      : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
@@ -248,6 +293,21 @@ function NewMeetingContent() {
             onChange={e => setTypedNotes(e.target.value)}
           />
         </div>
+
+        {/* Save buttons */}
+        {recordingState === 'done' && (
+          <button
+            onClick={async () => {
+              await new Promise(r => setTimeout(r, 200))
+              const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' })
+              await saveMeeting(audioBlob)
+            }}
+            disabled={saving}
+            className="btn-primary w-full"
+          >
+            {saving ? 'Saving...' : '✓ Save Meeting'}
+          </button>
+        )}
 
         {/* Save without recording */}
         {recordingState === 'idle' && typedNotes.length > 10 && (

@@ -1,12 +1,25 @@
 'use client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Meeting, MeetingNotes, ActionItem } from '@/types/database'
+import { createClient } from '@/lib/supabase/client'
+import { Meeting, MeetingNotes, ActionItem, MeetingOutcome } from '@/types/database'
 
 interface Props {
   meeting: Meeting & { contact?: { full_name: string; company: string; title: string } }
   notes: MeetingNotes | null
   actionItems: ActionItem[]
+}
+
+const OUTCOMES: { value: MeetingOutcome; label: string; bg: string; text: string }[] = [
+  { value: 'hot',            label: '🔥 Hot',           bg: 'bg-red-100',    text: 'text-red-700'    },
+  { value: 'follow_up',      label: '📅 Follow-up',     bg: 'bg-blue-100',   text: 'text-blue-700'   },
+  { value: 'intro_needed',   label: '🤝 Intro needed',  bg: 'bg-purple-100', text: 'text-purple-700' },
+  { value: 'not_interested', label: '👎 Not interested', bg: 'bg-gray-100',  text: 'text-gray-600'   },
+  { value: 'closed',         label: '✅ Closed',         bg: 'bg-green-100', text: 'text-green-700'  },
+]
+
+function outcomeStyle(o?: string | null) {
+  return OUTCOMES.find(x => x.value === o) ?? null
 }
 
 export default function MeetingDetail({ meeting, notes, actionItems }: Props) {
@@ -20,7 +33,11 @@ export default function MeetingDetail({ meeting, notes, actionItems }: Props) {
   const [followupDraft, setFollowupDraft] = useState<{ subject: string; body: string; to_email?: string } | null>(null)
   const [showFollowup, setShowFollowup] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [outcome, setOutcome] = useState<MeetingOutcome | null>(meeting.outcome ?? null)
+  const [showOutcomePicker, setShowOutcomePicker] = useState(false)
+  const [savingOutcome, setSavingOutcome] = useState(false)
   const router = useRouter()
+  const supabase = createClient()
 
   async function generateNotes() {
     setGenerating(true)
@@ -31,6 +48,14 @@ export default function MeetingDetail({ meeting, notes, actionItems }: Props) {
     })
     setGenerating(false)
     router.refresh()
+  }
+
+  async function saveOutcome(newOutcome: MeetingOutcome) {
+    setSavingOutcome(true)
+    setOutcome(newOutcome)
+    setShowOutcomePicker(false)
+    await supabase.from('cb_meetings').update({ outcome: newOutcome }).eq('id', meeting.id)
+    setSavingOutcome(false)
   }
 
   async function exportDocx() {
@@ -76,21 +101,35 @@ export default function MeetingDetail({ meeting, notes, actionItems }: Props) {
   }
 
   const isProcessing = meeting.status === 'processing' || meeting.transcription_status === 'processing'
+  const outcomeInfo = outcomeStyle(outcome)
 
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
       <header className="bg-white border-b border-gray-100 px-4 py-4 flex items-center gap-3">
         <button onClick={() => router.back()} className="text-gray-500">←</button>
-        <div className="flex-1">
+        <div className="flex-1 min-w-0">
           <h1 className="font-semibold text-gray-900">{meeting.contact?.full_name ?? 'Meeting Notes'}</h1>
           <p className="text-xs text-gray-500">
             {meeting.contact?.company} · {new Date(meeting.meeting_date).toLocaleDateString()}
           </p>
         </div>
-        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-          meeting.status === 'notes_ready' ? 'bg-green-100 text-green-700' :
-          isProcessing ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500'
-        }`}>{meeting.status.replace('_', ' ')}</span>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {/* Outcome badge — tap to change */}
+          <button
+            onClick={() => setShowOutcomePicker(true)}
+            className={`text-xs font-medium px-2 py-1 rounded-full transition-colors ${
+              outcomeInfo
+                ? `${outcomeInfo.bg} ${outcomeInfo.text}`
+                : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
+            }`}
+          >
+            {savingOutcome ? '...' : outcomeInfo ? outcomeInfo.label : '+ Outcome'}
+          </button>
+          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+            meeting.status === 'notes_ready' ? 'bg-green-100 text-green-700' :
+            isProcessing ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500'
+          }`}>{meeting.status.replace('_', ' ')}</span>
+        </div>
       </header>
 
       <div className="px-4 py-5 max-w-lg mx-auto space-y-4">
@@ -239,6 +278,33 @@ export default function MeetingDetail({ meeting, notes, actionItems }: Props) {
                     📨 Open in Mail
                   </a>
                 )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Outcome picker modal */}
+        {showOutcomePicker && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-end justify-center">
+            <div className="bg-white rounded-t-2xl w-full max-w-lg">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+                <h3 className="font-semibold text-gray-900">Set Meeting Outcome</h3>
+                <button onClick={() => setShowOutcomePicker(false)} className="text-gray-400 text-xl">✕</button>
+              </div>
+              <div className="p-4 space-y-2 pb-8">
+                {OUTCOMES.map(o => (
+                  <button
+                    key={o.value}
+                    onClick={() => saveOutcome(o.value)}
+                    className={`w-full text-left px-4 py-3 rounded-xl border text-sm font-medium transition-all ${
+                      outcome === o.value
+                        ? `${o.bg} ${o.text} border-transparent`
+                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    {o.label}
+                  </button>
+                ))}
               </div>
             </div>
           </div>

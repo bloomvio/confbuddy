@@ -1,21 +1,38 @@
 'use client'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
 const nav = [
-  { href: '/dashboard',     icon: '🏠', label: 'Dashboard'  },
-  { href: '/contacts',      icon: '👥', label: 'Contacts'   },
-  { href: '/contacts/scan', icon: '📷', label: 'Scan Badge' },
-  { href: '/meetings',      icon: '🎙️', label: 'Meetings'   },
-  { href: '/action-items',  icon: '✅', label: 'Actions'    },
-  { href: '/settings',      icon: '⚙️', label: 'Settings'   },
+  { href: '/dashboard',     icon: '🏠', label: 'Dashboard'   },
+  { href: '/conferences',   icon: '🎪', label: 'Conferences' },
+  { href: '/contacts',      icon: '👥', label: 'Contacts'    },
+  { href: '/contacts/scan', icon: '📷', label: 'Scan Badge'  },
+  { href: '/meetings',      icon: '🎙️', label: 'Meetings'    },
+  { href: '/action-items',  icon: '✅', label: 'Actions'     },
+  { href: '/settings',      icon: '⚙️', label: 'Settings'    },
 ]
 
-// Mobile shows 5 items — drop Settings from bottom nav, keep in sidebar
-const mobileNav = nav.filter(n => n.href !== '/settings')
+const mobileNav = nav.filter(n => n.href !== '/settings' && n.href !== '/action-items')
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
+  const [activeConf, setActiveConf] = useState<{ id: string; name: string } | null>(null)
+
+  useEffect(() => {
+    const id   = localStorage.getItem('active_conference_id')
+    const name = localStorage.getItem('active_conference_name')
+    if (id && name) setActiveConf({ id, name })
+
+    // Keep in sync if another tab changes it
+    const handler = () => {
+      const id2   = localStorage.getItem('active_conference_id')
+      const name2 = localStorage.getItem('active_conference_name')
+      setActiveConf(id2 && name2 ? { id: id2, name: name2 } : null)
+    }
+    window.addEventListener('storage', handler)
+    return () => window.removeEventListener('storage', handler)
+  }, [])
 
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden">
@@ -32,14 +49,24 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
 
+        {/* Active conference pill */}
+        {activeConf && (
+          <Link href={`/conferences/${activeConf.id}`}
+            className="mx-3 mt-3 px-3 py-2 bg-indigo-50 border border-indigo-100 rounded-xl flex items-center gap-2 hover:bg-indigo-100 transition-colors">
+            <span className="text-sm">🎪</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-indigo-700 truncate">{activeConf.name}</p>
+              <p className="text-xs text-indigo-400">Active conference</p>
+            </div>
+          </Link>
+        )}
+
         {/* Nav links */}
         <nav className="flex-1 px-3 py-4 space-y-0.5">
           {nav.map(n => {
             const active =
               pathname === n.href ||
-              (n.href !== '/dashboard' &&
-               n.href !== '/contacts/scan' &&
-               pathname.startsWith(n.href))
+              (n.href !== '/dashboard' && n.href !== '/contacts/scan' && pathname.startsWith(n.href))
             return (
               <Link key={n.href} href={n.href}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
@@ -52,7 +79,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
-        {/* Footer */}
         <div className="px-5 py-4 border-t border-gray-100">
           <p className="text-xs text-gray-400">Powered by Claude AI</p>
         </div>
@@ -60,12 +86,21 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* Main content */}
       <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Active conference banner — mobile only */}
+        {activeConf && (
+          <Link href={`/conferences/${activeConf.id}`}
+            className="md:hidden flex items-center gap-2 bg-indigo-600 text-white px-4 py-1.5 text-xs font-medium">
+            <span>🎪</span>
+            <span className="truncate">{activeConf.name}</span>
+            <span className="ml-auto opacity-70">→</span>
+          </Link>
+        )}
         <main className="flex-1 overflow-y-auto pb-20 md:pb-0">
           {children}
         </main>
       </div>
 
-      {/* Bottom nav — mobile only (5 items) */}
+      {/* Bottom nav — mobile only */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 flex z-50">
         {mobileNav.map(n => {
           const active = pathname === n.href || pathname.startsWith(n.href + '/')
