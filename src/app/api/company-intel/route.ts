@@ -33,55 +33,107 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ── 2. Pull all CRM data for this company ────────────────────────────────
-  const { data: crmRows } = await supabase
-    .from('cb_crm_data')
-    .select('*')
-    .ilike('company', `%${company}%`)
-    .limit(10)
+  // ── 2. Pull ALL data sources in parallel ────────────────────────────────
+  const [
+    { data: crmRows },
+    contactResult,
+    meetingNotesResult,
+  ] = await Promise.all([
+    // Source 1: CRM data (CSV uploads + Salesforce sync — both land in cb_crm_data)
+    supabase
+      .from('cb_crm_data')
+      .select('*')
+      .ilike('company', `%${company}%`)
+      .limit(20),
 
-  // ── 3. Pull existing contact info ────────────────────────────────────────
-  let contactInfo = null
-  if (contact_id) {
-    const { data } = await supabase
-      .from('cb_contacts')
-      .select('full_name, title, company, email, crm_relationship, crm_temperature, crm_notes, crm_products_implemented, systems_landscape')
-      .eq('id', contact_id)
-      .single()
-    contactInfo = data
-  }
+    // Source 2: Contact being met (name, title, relationship, products, notes)
+    contact_id
+      ? supabase
+          .from('cb_contacts')
+          .select('full_name, title, company, email, crm_relationship, crm_temperature, crm_notes, crm_products_implemented, systems_landscape')
+          .eq('id', contact_id)
+          .single()
+      : Promise.resolve({ data: null }),
 
-  // ── 4. Summarise CRM data for prompt ─────────────────────────────────────
+    // Source 3: Past meeting notes with people from this company
+    contact_id
+      ? supabase
+          .from('cb_meetings')
+          .select('meeting_date, cb_meeting_notes(bottom_line_summary, intent, raw_notes)')
+          .eq('contact_id', contact_id)
+          .eq('status', 'notes_ready')
+          .order('meeting_date', { ascending: false })
+          .limit(5)
+      : Promise.resolve({ data: null }),
+  ])
+
+  const contactInfo = contactResult.data ?? null
+  const pastMeetings = (meetingNotesResult.data ?? []) as Array<{
+    meeting_date: string
+    cb_meeting_notes: Array<{ bottom_line_summary: string; intent: string; raw_notes: string }>
+  }>
+
+  // ── 3. Summarise CRM data ────────────────────────────────────────────────
   const crmSummary = crmRows && crmRows.length > 0 ? crmRows.map(r => ({
-    name:                  r.full_name,
-    relationship:          r.relationship,
-    temperature:           r.temperature,
-    products:              r.products_implemented,
-    arr:                   r.arr,
-    contract_value:        r.contract_value,
-    outstanding_invoices:  r.outstanding_invoices,
-    outstanding_amount:    r.outstanding_amount,
-    open_issues:           r.open_issues,
-    health_score:          r.health_score,
-    renewal_date:          r.renewal_date,
-    account_owner:         r.account_owner,
-    last_contact:          r.last_contact_date,
-    notes:                 r.notes,
-    extra:                 r.raw_row,  // full raw row — may contain extra financial/service fields
+    name:                 r.full_name,
+    relationship:         r.relationship,
+    temperature:          r.temperature,
+    products:             r.products_implemented,
+    arr:                  r.arr,
+    contract_value:       r.contract_value,
+    outstanding_invoices: r.outstanding_invoices,
+    outstanding_amount:   r.outstanding_amount,
+    open_issues:          r.open_issues,
+    health_score:         r.health_score,
+    renewal_date:         r.renewal_date,
+    account_owner:        r.account_owner,
+    last_contact:         r.last_contact_date,
+    notes:                r.notes,
+    extra:                r.raw_row,
   })) : null
 
-  // ── 5. Build the intelligence prompt ─────────────────────────────────────
-  const prompt = `You are a senior B2B sales intelligence analyst. A sales professional is about to meet someone from "${company}". Build the most comprehensive, actionable intelligence brief possible.
+  // ── 4. Summarise past meetings ────────────────────────────────────────────
+  const meetingHistory = pastMeetings.length > 0
+    ? pastMeetings.map(m => {
+        const note = m.cb_meeting_notes?.[0]
+        return {
+          date: m.meeting_date?.split('T')[0],
+          summary: note?.bottom_line_summary ?? null,
+          intent:  note?.intent ?? null,
+        }
+      }).filter(m => m.summary || m.intent)
+    : null
 
-INTERNAL CRM DATA (our own records about this company):
+  // ── 5. Build the prompt ──────────────────────────────────────────────────
+  const prompt = `You are a senior B2B sales intelligence analyst. A sales professional is about to meet someone from "${company}". Build the most comprehensive, actionable intelligence brief possible using ALL available sources below.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SOURCE 1: INTERNAL CRM DATA
+(From CSV/Excel uploads and Salesforce sync — treat as ground truth)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ${crmSummary ? JSON.stringify(crmSummary, null, 2) : 'No CRM records found for this company.'}
 
-CONTACT BEING MET:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SOURCE 2: CONTACT BEING MET
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ${contactInfo ? JSON.stringify(contactInfo, null, 2) : 'Unknown'}
 
-Your brief MUST include everything from both public knowledge AND the CRM data above.
-For public fields — use your training knowledge. For CRM fields — use exactly what's in the data.
-Mark estimates with (~). Be specific, not vague.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SOURCE 3: PAST MEETING HISTORY
+(Notes from previous meetings with this contact — use to identify progress, open items, relationship context)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${meetingHistory && meetingHistory.length > 0 ? JSON.stringify(meetingHistory, null, 2) : 'No previous meetings recorded.'}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SOURCE 4: PUBLIC / MARKET KNOWLEDGE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Use your training knowledge for: company background, industry, financials, leadership, news, tech stack, competitors.
+
+INSTRUCTIONS:
+- For CRM fields — use exactly what is in the data. Do not invent or estimate CRM values.
+- For public fields — use your knowledge. Mark estimates with (~).
+- For meeting history — surface any open threads, prior commitments, or relationship signals.
+- Be specific, not vague. Prioritise actionability.
 
 Return ONLY valid JSON in this exact structure:
 
@@ -90,7 +142,7 @@ Return ONLY valid JSON in this exact structure:
   "industry": "...",
   "hq": "City, Country",
   "founded": "YYYY",
-  "size": "X,000 employees (est.)",
+  "size": "X,000 employees (~)",
   "public_or_private": "Public (TICKER) | Private",
 
   "financials": {
@@ -115,8 +167,10 @@ Return ONLY valid JSON in this exact structure:
     "outstanding_amount": "from CRM or null",
     "open_issues": ["from CRM"],
     "health": "green | yellow | red | unknown",
-    "notes": "key context from CRM notes"
+    "notes": "combined CRM notes + any open threads from past meetings"
   },
+
+  "relationship_history": "1-2 sentences summarising prior meetings, any open commitments or next steps from previous conversations",
 
   "leadership": [
     {
@@ -157,13 +211,13 @@ Return ONLY valid JSON in this exact structure:
   ],
 
   "talking_points": [
-    "Opener 1 — tie to their stated priority",
+    "Opener 1 — tie to their stated priority or prior meeting context",
     "Opener 2 — reference growth signal",
     "Opener 3 — reference pain point or CRM context"
   ],
 
   "risks": [
-    "Risk 1 (budget freeze, competitor, etc.)",
+    "Risk 1 (budget freeze, competitor, open invoice, etc.)",
     "Risk 2"
   ]
 }
@@ -185,7 +239,6 @@ Return ONLY valid JSON in this exact structure:
     // ── 6. Cache the result ────────────────────────────────────────────────
     const serviceClient = await createServiceClient()
 
-    // Upsert: delete old entry for this user+company, insert fresh
     await serviceClient
       .from('cb_company_intel')
       .delete()

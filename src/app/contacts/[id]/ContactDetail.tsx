@@ -39,11 +39,12 @@ interface Props {
   contact: Contact
   meetings: Meeting[]
   cachedIntel?: CompanyIntelData | null
+  shouldAutoGenerate?: boolean
 }
 
 type Tab = 'profile' | 'intelligence' | 'meetings'
 
-export default function ContactDetail({ contact, meetings, cachedIntel }: Props) {
+export default function ContactDetail({ contact, meetings, cachedIntel, shouldAutoGenerate = false }: Props) {
   const [tab, setTab] = useState<Tab>('profile')
   const [sfPushState, setSfPushState] = useState<Record<string, 'idle' | 'pushing' | 'done' | 'error'>>({})
   const [sfPushMsg, setSfPushMsg] = useState<Record<string, string>>({})
@@ -171,16 +172,56 @@ export default function ContactDetail({ contact, meetings, cachedIntel }: Props)
               </a>
             )}
 
-            {/* Prompt for intel if no company summary yet */}
-            {!contact.company_summary && contact.company && (
-              <div className="card text-center py-6 text-gray-400 text-sm space-y-2">
-                <p>No profile data yet.</p>
-                <button
-                  onClick={() => setTab('intelligence')}
-                  className="text-indigo-500 font-medium text-sm"
-                >
-                  Run intelligence brief →
-                </button>
+            {/* Intel preview card — shows on Profile tab */}
+            {contact.company && (
+              <div className="card">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">🔭 Intelligence Brief</p>
+                  <button
+                    onClick={() => setTab('intelligence')}
+                    className="text-xs text-indigo-500 font-medium hover:text-indigo-700 transition-colors"
+                  >
+                    Full brief →
+                  </button>
+                </div>
+
+                {cachedIntel ? (
+                  <div className="space-y-2">
+                    {cachedIntel.snapshot && (
+                      <p className="text-sm text-gray-700 leading-snug">{cachedIntel.snapshot}</p>
+                    )}
+                    {cachedIntel.talking_points && cachedIntel.talking_points.length > 0 && (
+                      <div className="mt-2">
+                        <p className="text-xs text-gray-400 mb-1">Top talking point</p>
+                        <p className="text-sm text-indigo-700 font-medium leading-snug">
+                          {cachedIntel.talking_points[0]}
+                        </p>
+                      </div>
+                    )}
+                    {cachedIntel.risks && cachedIntel.risks.length > 0 && (
+                      <div className="bg-amber-50 rounded-lg px-3 py-2 mt-1">
+                        <p className="text-xs text-amber-700">
+                          ⚠️ {cachedIntel.risks[0]}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                ) : shouldAutoGenerate ? (
+                  <div className="flex items-center gap-2 py-2">
+                    <div className="text-lg animate-pulse">🔍</div>
+                    <div>
+                      <p className="text-sm text-gray-600 font-medium">Generating intel brief...</p>
+                      <p className="text-xs text-gray-400">Using CRM data, Salesforce &amp; public sources</p>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setTab('intelligence')}
+                    className="text-sm text-indigo-500 font-medium"
+                  >
+                    Generate intel for {contact.company} →
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -192,6 +233,7 @@ export default function ContactDetail({ contact, meetings, cachedIntel }: Props)
             company={contact.company}
             contactId={contact.id}
             initialIntel={cachedIntel}
+            autoFetch={shouldAutoGenerate}
           />
         )}
         {tab === 'intelligence' && !contact.company && (

@@ -71,6 +71,15 @@ export default function ScanPage() {
       return null
     }
 
+    if (data?.company) {
+      // Fire intel generation immediately in background — cached by the time user opens the contact
+      fetch('/api/company-intel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contact_id: data.id, company: data.company }),
+      }).catch(() => {})
+    }
+
     return data ?? null
   }
 

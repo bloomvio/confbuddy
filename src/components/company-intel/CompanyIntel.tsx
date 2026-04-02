@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 interface LeadershipEntry {
   name: string
@@ -70,6 +70,7 @@ interface Props {
   company: string
   contactId: string
   initialIntel?: CompanyIntelData | null
+  autoFetch?: boolean
 }
 
 // ── Tiny helpers ──────────────────────────────────────────────────────────────
@@ -122,11 +123,18 @@ function tempColor(t?: string): 'red' | 'amber' | 'indigo' | 'gray' {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function CompanyIntel({ company, contactId, initialIntel }: Props) {
+export default function CompanyIntel({ company, contactId, initialIntel, autoFetch = false }: Props) {
   const [intel, setIntel] = useState<CompanyIntelData | null>(initialIntel ?? null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [cached, setCached] = useState(!!initialIntel)
+
+  // Auto-fetch on mount if no intel and autoFetch is set
+  useEffect(() => {
+    if (!initialIntel && autoFetch) {
+      fetchIntel(false)
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function fetchIntel(forceRefresh = false) {
     setLoading(true)
@@ -155,12 +163,19 @@ export default function CompanyIntel({ company, contactId, initialIntel }: Props
         <div className="text-4xl">🔭</div>
         <h3 className="font-semibold text-gray-800">Sales Intelligence</h3>
         <p className="text-sm text-gray-500 max-w-xs mx-auto">
-          Get a full brief on {company} — financials, leadership priorities, pain points, talking points &amp; more.
+          Full brief on {company} — financials, leadership, pain points &amp; talking points.
         </p>
         <button onClick={() => fetchIntel(false)} className="btn-primary mx-auto">
           Generate Intel Brief
         </button>
-        {error && <p className="text-xs text-red-500">{error}</p>}
+        {error && (
+          <div className="space-y-2">
+            <p className="text-xs text-red-500">{error}</p>
+            <button onClick={() => fetchIntel(false)} className="text-xs text-indigo-500 underline">
+              Try again
+            </button>
+          </div>
+        )}
       </div>
     )
   }
