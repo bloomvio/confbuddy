@@ -29,8 +29,20 @@ export interface Conference {
   end_date: string | null
   description: string | null
   is_active: boolean
+  join_code: string | null
   created_at: string
   updated_at: string
+}
+
+export interface Notification {
+  id: string
+  user_id: string
+  type: 'processing' | 'success' | 'error' | 'info'
+  title: string
+  body: string | null
+  read: boolean
+  metadata: Record<string, unknown>
+  created_at: string
 }
 
 export interface ConferenceMember {

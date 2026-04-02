@@ -12,16 +12,28 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     { data: documents },
     { data: attendees },
     { count: meetingCount },
+    { data: members },
   ] = await Promise.all([
-    supabase.from('cb_conferences').select('*').eq('id', id).eq('user_id', user.id).single(),
+    // RLS allows owner + members to read (after v2 migration)
+    supabase.from('cb_conferences').select('*, join_code').eq('id', id).single(),
     supabase.from('cb_conference_documents').select('*').eq('conference_id', id).order('created_at', { ascending: false }),
     supabase.from('cb_conference_attendees').select('*').eq('conference_id', id).order('is_target', { ascending: false }),
     supabase.from('cb_meetings').select('*', { count: 'exact', head: true }).eq('conference_id', id),
+    supabase.from('cb_conference_members').select('user_id, role, joined_at').eq('conference_id', id),
   ])
 
   if (!conference) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  return NextResponse.json({ conference, documents: documents ?? [], attendees: attendees ?? [], meeting_count: meetingCount ?? 0 })
+  const isOwner = conference.user_id === user.id
+
+  return NextResponse.json({
+    conference,
+    documents:     documents    ?? [],
+    attendees:     attendees    ?? [],
+    members:       members      ?? [],
+    meeting_count: meetingCount ?? 0,
+    is_owner:      isOwner,
+  })
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -32,7 +44,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const body = await req.json()
 
-  // If setting active, deactivate all others first
   if (body.is_active === true) {
     await supabase.from('cb_conferences').update({ is_active: false }).eq('user_id', user.id)
   }
@@ -41,7 +52,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     .from('cb_conferences')
     .update({ ...body, updated_at: new Date().toISOString() })
     .eq('id', id)
-    .eq('user_id', user.id)
+    .eq('user_id', user.id)   // only owner can patch
     .select()
     .single()
 
@@ -59,7 +70,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     .from('cb_conferences')
     .delete()
     .eq('id', id)
-    .eq('user_id', user.id)
+    .eq('user_id', user.id)   // only owner can delete
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ success: true })

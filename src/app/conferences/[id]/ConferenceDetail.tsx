@@ -4,7 +4,8 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import type { Conference, ConferenceDocument, ConferenceAttendee } from '@/types/database'
 
-type MeetingRow = { id: string; meeting_date: string; status: string; outcome: string | null; contact?: { full_name: string; company: string } }
+type MeetingRow  = { id: string; meeting_date: string; status: string; outcome: string | null; contact?: { full_name: string; company: string } }
+type MemberRow   = { user_id: string; role: string; joined_at: string }
 type Tab = 'overview' | 'attendees' | 'documents' | 'meetings'
 
 const FILE_TYPE_LABELS: Record<string, string> = {
@@ -25,13 +26,15 @@ const OUTCOME_CONFIG: Record<string, { label: string; color: string }> = {
 }
 
 interface Props {
-  conference: Conference
+  conference: Conference & { join_code?: string }
   documents:  ConferenceDocument[]
   attendees:  ConferenceAttendee[]
   meetings:   MeetingRow[]
+  members:    MemberRow[]
+  isOwner:    boolean
 }
 
-export default function ConferenceDetail({ conference, documents: initialDocs, attendees: initialAttendees, meetings }: Props) {
+export default function ConferenceDetail({ conference, documents: initialDocs, attendees: initialAttendees, meetings, members, isOwner }: Props) {
   const [tab, setTab]             = useState<Tab>('overview')
   const [docs, setDocs]           = useState(initialDocs)
   const [attendees, setAttendees] = useState(initialAttendees)
@@ -39,8 +42,9 @@ export default function ConferenceDetail({ conference, documents: initialDocs, a
   const [uploadingAtt, setUploadingAtt]   = useState(false)
   const [docFileType, setDocFileType]     = useState<string>('other')
   const [uploadMsg, setUploadMsg]         = useState<string | null>(null)
-  const [precaching, setPrecaching]       = useState(false)
+  const [precaching, setPrecaching]             = useState(false)
   const [precacheProgress, setPrecacheProgress] = useState<{ done: number; total: number } | null>(null)
+  const [copied, setCopied]                     = useState(false)
   const [isActive, setIsActive]           = useState(conference.is_active)
   const docFileRef = useRef<HTMLInputElement>(null)
   const attFileRef = useRef<HTMLInputElement>(null)
@@ -107,48 +111,18 @@ export default function ConferenceDetail({ conference, documents: initialDocs, a
   // ── Pre-cache intel ───────────────────────────────────────────────────────────
   async function handlePrecache() {
     setPrecaching(true)
-    setPrecacheProgress(null)
-    setUploadMsg('Finding companies...')
+    setUploadMsg('Queuing intel generation...')
 
-    // Step 1: get the list of companies to process
     const res  = await fetch(`/api/conferences/${conference.id}/precache-intel`, { method: 'POST' })
     const data = await res.json()
+    setPrecaching(false)
 
-    if (!data.companies?.length) {
-      setPrecaching(false)
-      setUploadMsg('No companies found. Upload an attendee list or CRM export first.')
+    if (data.error) {
+      setUploadMsg(`Error: ${data.error}`)
       return
     }
 
-    const { companies, conference_id } = data as {
-      companies: { company: string; contact_id: string | null }[]
-      conference_id: string
-    }
-
-    setPrecacheProgress({ done: 0, total: companies.length })
-    setUploadMsg(`Generating intel for ${companies.length} companies...`)
-
-    // Step 2: call /api/company-intel for each company directly from the browser
-    // Run in parallel batches of 2 to avoid hammering the API
-    let done = 0
-    for (let i = 0; i < companies.length; i += 2) {
-      const batch = companies.slice(i, i + 2)
-      await Promise.all(batch.map(async ({ company, contact_id }) => {
-        try {
-          await fetch('/api/company-intel', {
-            method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({ company, contact_id, conference_id }),
-          })
-        } catch {}
-        done++
-        setPrecacheProgress({ done, total: companies.length })
-      }))
-    }
-
-    setPrecaching(false)
-    setPrecacheProgress(null)
-    setUploadMsg(`✓ Intel generated for ${done} companies — ready for the conference!`)
+    setUploadMsg(`🔔 Generating intel for ${data.total} companies in the background — you'll get a notification when it's done.`)
   }
 
   // ── Delete document ───────────────────────────────────────────────────────────
@@ -242,6 +216,43 @@ export default function ConferenceDetail({ conference, documents: initialDocs, a
               <div className="card">
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Goals & Notes</p>
                 <p className="text-sm text-gray-700">{conference.description}</p>
+              </div>
+            )}
+
+            {/* Join code */}
+            {conference.join_code && (
+              <div className="card flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Team Join Code</p>
+                  <p className="text-2xl font-bold tracking-[0.3em] text-indigo-700">{conference.join_code}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Share this with your team so they can join</p>
+                </div>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(conference.join_code!)
+                    setCopied(true)
+                    setTimeout(() => setCopied(false), 2000)
+                  }}
+                  className="btn-secondary text-sm flex-shrink-0"
+                >
+                  {copied ? '✓ Copied' : '📋 Copy'}
+                </button>
+              </div>
+            )}
+
+            {/* Team members */}
+            {members.length > 1 && (
+              <div className="card">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Team ({members.length})</p>
+                <div className="flex flex-wrap gap-2">
+                  {members.map(m => (
+                    <span key={m.user_id} className={`text-xs px-2 py-1 rounded-full font-medium ${
+                      m.role === 'owner' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600'
+                    }`}>
+                      {m.role === 'owner' ? '👑' : '👤'} {m.role}
+                    </span>
+                  ))}
+                </div>
               </div>
             )}
 

@@ -14,8 +14,9 @@ export default async function ConferencePage({ params }: { params: Promise<{ id:
     { data: documents },
     { data: attendees },
     { data: meetings },
+    { data: members },
   ] = await Promise.all([
-    supabase.from('cb_conferences').select('*').eq('id', id).eq('user_id', user.id).single(),
+    supabase.from('cb_conferences').select('*, join_code').eq('id', id).single(),
     supabase.from('cb_conference_documents').select('*').eq('conference_id', id).order('created_at', { ascending: false }),
     supabase.from('cb_conference_attendees').select('*').eq('conference_id', id).order('is_target', { ascending: false }),
     supabase
@@ -23,9 +24,12 @@ export default async function ConferencePage({ params }: { params: Promise<{ id:
       .select('*, contact:cb_contacts(full_name, company)')
       .eq('conference_id', id)
       .order('meeting_date', { ascending: false }),
+    supabase.from('cb_conference_members').select('user_id, role, joined_at').eq('conference_id', id),
   ])
 
   if (!conference) notFound()
+
+  const isOwner = conference.user_id === user.id
 
   return (
     <AppShell>
@@ -34,6 +38,8 @@ export default async function ConferencePage({ params }: { params: Promise<{ id:
         documents={documents ?? []}
         attendees={attendees ?? []}
         meetings={meetings ?? []}
+        members={members ?? []}
+        isOwner={isOwner}
       />
     </AppShell>
   )
