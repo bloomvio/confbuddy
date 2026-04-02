@@ -4,6 +4,15 @@ import Link from 'next/link'
 import CompanyIntel from '@/components/company-intel/CompanyIntel'
 import type { CompanyIntelData } from '@/components/company-intel/CompanyIntel'
 
+async function pushMeetingToSalesforce(meetingId: string): Promise<{ success?: boolean; error?: string; linked_to_contact?: boolean }> {
+  const res = await fetch('/api/salesforce/push-notes', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ meeting_id: meetingId }),
+  })
+  return res.json()
+}
+
 interface Contact {
   id: string
   full_name: string
@@ -36,6 +45,20 @@ type Tab = 'profile' | 'intelligence' | 'meetings'
 
 export default function ContactDetail({ contact, meetings, cachedIntel }: Props) {
   const [tab, setTab] = useState<Tab>('profile')
+  const [sfPushState, setSfPushState] = useState<Record<string, 'idle' | 'pushing' | 'done' | 'error'>>({})
+  const [sfPushMsg, setSfPushMsg] = useState<Record<string, string>>({})
+
+  async function handleSfPush(meetingId: string) {
+    setSfPushState(s => ({ ...s, [meetingId]: 'pushing' }))
+    const result = await pushMeetingToSalesforce(meetingId)
+    if (result.success) {
+      setSfPushState(s => ({ ...s, [meetingId]: 'done' }))
+      setSfPushMsg(m => ({ ...m, [meetingId]: result.linked_to_contact ? 'Logged to Salesforce contact' : 'Logged to Salesforce (no matching contact found)' }))
+    } else {
+      setSfPushState(s => ({ ...s, [meetingId]: 'error' }))
+      setSfPushMsg(m => ({ ...m, [meetingId]: result.error ?? 'Push failed' }))
+    }
+  }
 
   const systems = contact.systems_landscape as string[] | null
 
@@ -193,32 +216,52 @@ export default function ContactDetail({ contact, meetings, cachedIntel }: Props)
             )}
 
             {meetings.map(m => (
-              <Link
-                key={m.id}
-                href={`/meetings/${m.id}`}
-                className="card flex items-center gap-3 hover:border-indigo-200 transition-colors"
-              >
-                <span className="text-2xl">🗓️</span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium">
-                    {new Date(m.meeting_date).toLocaleDateString('en-US', {
-                      month: 'short', day: 'numeric', year: 'numeric',
-                    })}
-                  </p>
-                  {m.cb_meeting_notes?.[0]?.bottom_line_summary && (
-                    <p className="text-xs text-gray-400 truncate">
-                      {m.cb_meeting_notes[0].bottom_line_summary.split('\n')[0]}
+              <div key={m.id} className="card space-y-2">
+                <Link
+                  href={`/meetings/${m.id}`}
+                  className="flex items-center gap-3 hover:opacity-80 transition-opacity"
+                >
+                  <span className="text-2xl">🗓️</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium">
+                      {new Date(m.meeting_date).toLocaleDateString('en-US', {
+                        month: 'short', day: 'numeric', year: 'numeric',
+                      })}
                     </p>
-                  )}
-                </div>
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${
-                  m.status === 'notes_ready' ? 'bg-green-100 text-green-700' :
-                  m.status === 'processing'  ? 'bg-amber-100 text-amber-700' :
-                  'bg-gray-100 text-gray-500'
-                }`}>
-                  {m.status.replace('_', ' ')}
-                </span>
-              </Link>
+                    {m.cb_meeting_notes?.[0]?.bottom_line_summary && (
+                      <p className="text-xs text-gray-400 truncate">
+                        {m.cb_meeting_notes[0].bottom_line_summary.split('\n')[0]}
+                      </p>
+                    )}
+                  </div>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${
+                    m.status === 'notes_ready' ? 'bg-green-100 text-green-700' :
+                    m.status === 'processing'  ? 'bg-amber-100 text-amber-700' :
+                    'bg-gray-100 text-gray-500'
+                  }`}>
+                    {m.status.replace('_', ' ')}
+                  </span>
+                </Link>
+
+                {/* Push to Salesforce */}
+                {m.status === 'notes_ready' && (
+                  <div className="flex items-center gap-2 pt-1 border-t border-gray-50">
+                    {sfPushState[m.id] === 'done' ? (
+                      <p className="text-xs text-green-600">✓ {sfPushMsg[m.id]}</p>
+                    ) : sfPushState[m.id] === 'error' ? (
+                      <p className="text-xs text-red-500">{sfPushMsg[m.id]}</p>
+                    ) : (
+                      <button
+                        onClick={() => handleSfPush(m.id)}
+                        disabled={sfPushState[m.id] === 'pushing'}
+                        className="text-xs text-gray-400 hover:text-indigo-600 transition-colors font-medium"
+                      >
+                        {sfPushState[m.id] === 'pushing' ? 'Logging...' : '☁️ Log to Salesforce'}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         )}
