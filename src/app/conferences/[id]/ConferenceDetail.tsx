@@ -40,6 +40,7 @@ export default function ConferenceDetail({ conference, documents: initialDocs, a
   const [docFileType, setDocFileType]     = useState<string>('other')
   const [uploadMsg, setUploadMsg]         = useState<string | null>(null)
   const [precaching, setPrecaching]       = useState(false)
+  const [precacheProgress, setPrecacheProgress] = useState<{ done: number; total: number } | null>(null)
   const [isActive, setIsActive]           = useState(conference.is_active)
   const docFileRef = useRef<HTMLInputElement>(null)
   const attFileRef = useRef<HTMLInputElement>(null)
@@ -106,15 +107,48 @@ export default function ConferenceDetail({ conference, documents: initialDocs, a
   // ── Pre-cache intel ───────────────────────────────────────────────────────────
   async function handlePrecache() {
     setPrecaching(true)
-    setUploadMsg('Generating intel for your accounts... this takes ~1 min')
+    setPrecacheProgress(null)
+    setUploadMsg('Finding companies...')
+
+    // Step 1: get the list of companies to process
     const res  = await fetch(`/api/conferences/${conference.id}/precache-intel`, { method: 'POST' })
     const data = await res.json()
-    setPrecaching(false)
-    if (data.message) {
-      setUploadMsg(data.message)
-    } else {
-      setUploadMsg(`✓ Intel generated for ${data.cached} of ${data.total} companies`)
+
+    if (!data.companies?.length) {
+      setPrecaching(false)
+      setUploadMsg('No companies found. Upload an attendee list or CRM export first.')
+      return
     }
+
+    const { companies, conference_id } = data as {
+      companies: { company: string; contact_id: string | null }[]
+      conference_id: string
+    }
+
+    setPrecacheProgress({ done: 0, total: companies.length })
+    setUploadMsg(`Generating intel for ${companies.length} companies...`)
+
+    // Step 2: call /api/company-intel for each company directly from the browser
+    // Run in parallel batches of 2 to avoid hammering the API
+    let done = 0
+    for (let i = 0; i < companies.length; i += 2) {
+      const batch = companies.slice(i, i + 2)
+      await Promise.all(batch.map(async ({ company, contact_id }) => {
+        try {
+          await fetch('/api/company-intel', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ company, contact_id, conference_id }),
+          })
+        } catch {}
+        done++
+        setPrecacheProgress({ done, total: companies.length })
+      }))
+    }
+
+    setPrecaching(false)
+    setPrecacheProgress(null)
+    setUploadMsg(`✓ Intel generated for ${done} companies — ready for the conference!`)
   }
 
   // ── Delete document ───────────────────────────────────────────────────────────
@@ -224,9 +258,24 @@ export default function ConferenceDetail({ conference, documents: initialDocs, a
                 </button>
                 <button onClick={handlePrecache} disabled={precaching} className="w-full text-left flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50">
                   <span className={`text-xl ${precaching ? 'animate-spin' : ''}`}>{precaching ? '⟳' : '🧠'}</span>
-                  <div>
-                    <p className="text-sm font-medium text-gray-800">{precaching ? 'Generating intel...' : 'Pre-generate Intel'}</p>
-                    <p className="text-xs text-gray-400">Cache briefs for target companies using uploaded docs + CRM data</p>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-gray-800">
+                      {precaching && precacheProgress
+                        ? `Generating… ${precacheProgress.done}/${precacheProgress.total}`
+                        : precaching ? 'Finding companies…'
+                        : 'Pre-generate Intel'}
+                    </p>
+                    {precaching && precacheProgress && (
+                      <div className="w-full bg-gray-200 rounded-full h-1 mt-1">
+                        <div
+                          className="bg-indigo-500 h-1 rounded-full transition-all"
+                          style={{ width: `${(precacheProgress.done / precacheProgress.total) * 100}%` }}
+                        />
+                      </div>
+                    )}
+                    {!precaching && (
+                      <p className="text-xs text-gray-400">Cache briefs for all companies using your docs + CRM data</p>
+                    )}
                   </div>
                 </button>
                 <Link href="/contacts/scan" className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 transition-colors">
