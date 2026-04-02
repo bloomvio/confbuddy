@@ -106,11 +106,15 @@ export default function ConferenceDetail({ conference, documents: initialDocs, a
   // ── Pre-cache intel ───────────────────────────────────────────────────────────
   async function handlePrecache() {
     setPrecaching(true)
-    setUploadMsg('Generating intel for your top accounts... this takes ~1 min')
+    setUploadMsg('Generating intel for your accounts... this takes ~1 min')
     const res  = await fetch(`/api/conferences/${conference.id}/precache-intel`, { method: 'POST' })
     const data = await res.json()
     setPrecaching(false)
-    setUploadMsg(`✓ Intel cached for ${data.cached} companies`)
+    if (data.message) {
+      setUploadMsg(data.message)
+    } else {
+      setUploadMsg(`✓ Intel generated for ${data.cached} of ${data.total} companies`)
+    }
   }
 
   // ── Delete document ───────────────────────────────────────────────────────────
@@ -218,11 +222,11 @@ export default function ConferenceDetail({ conference, documents: initialDocs, a
                     <p className="text-xs text-gray-400">Attendee lists, battlecards, product sheets</p>
                   </div>
                 </button>
-                <button onClick={handlePrecache} disabled={precaching || attendees.length === 0} className="w-full text-left flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50">
-                  <span className="text-xl">{precaching ? '⟳' : '🧠'}</span>
+                <button onClick={handlePrecache} disabled={precaching} className="w-full text-left flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50">
+                  <span className={`text-xl ${precaching ? 'animate-spin' : ''}`}>{precaching ? '⟳' : '🧠'}</span>
                   <div>
                     <p className="text-sm font-medium text-gray-800">{precaching ? 'Generating intel...' : 'Pre-generate Intel'}</p>
-                    <p className="text-xs text-gray-400">Cache briefs for all target companies now</p>
+                    <p className="text-xs text-gray-400">Cache briefs for target companies using uploaded docs + CRM data</p>
                   </div>
                 </button>
                 <Link href="/contacts/scan" className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 transition-colors">
