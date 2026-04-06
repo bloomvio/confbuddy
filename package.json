@@ -1,13 +1,4 @@
 {
-  "name": "confbuddy",
-  "version": "0.1.0",
-  "private": true,
-  "scripts": {
-    "dev": "next dev -p 4000",
-    "build": "next build",
-    "start": "next start",
-    "lint": "next lint"
-  },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@supabase/ssr": "^0.6.1",
