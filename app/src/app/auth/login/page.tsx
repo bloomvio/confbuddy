@@ -16,8 +16,8 @@ export default function LoginPage() {
     e.preventDefault()
     // Read directly from DOM to capture browser-autofilled values that may not have triggered onChange
     const form = e.currentTarget
-    const emailValue    = (form.elements.namedItem('email')    as HTMLInputElement).value
-    const passwordValue = (form.elements.namedItem('password') as HTMLInputElement).value
+    const emailValue    = (form.elements.namedItem('email')    as HTMLInputElement)?.value || email
+    const passwordValue = (form.elements.namedItem('password') as HTMLInputElement)?.value || password
     setLoading(true)
     setError('')
     const { data, error } = await supabase.auth.signInWithPassword({ email: emailValue, password: passwordValue })
@@ -52,11 +52,11 @@ export default function LoginPage() {
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-              <input type="email" className="input" value={email} onChange={e => setEmail(e.target.value)} required placeholder="you@company.com" autoComplete="email" />
+              <input type="email" name="email" className="input" value={email} onChange={e => setEmail(e.target.value)} required placeholder="you@company.com" autoComplete="email" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-              <input type="password" className="input" value={password} onChange={e => setPassword(e.target.value)} required placeholder="••••••••" autoComplete="current-password" />
+              <input type="password" name="password" className="input" value={password} onChange={e => setPassword(e.target.value)} required placeholder="••••••••" autoComplete="current-password" />
             </div>
             <button type="submit" className="btn-primary w-full" disabled={loading}>
               {loading ? 'Signing in...' : 'Sign in'}
