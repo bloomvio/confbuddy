@@ -6,6 +6,7 @@ export type CrmTemperature     = 'hot' | 'warm' | 'cold' | 'unknown'
 export type TranscriptionStatus = 'pending' | 'processing' | 'done' | 'failed'
 export type MeetingStatus      = 'recording' | 'processing' | 'notes_ready' | 'exported'
 export type MeetingOutcome     = 'hot' | 'follow_up' | 'not_interested' | 'intro_needed' | 'closed'
+export type InteractionType    = 'interaction' | 'meaningful_interaction'
 export type DocFileType        = 'attendee_list' | 'crm_export' | 'battlecard' | 'product_sheet' | 'competitor_intel' | 'other'
 export type ConferenceMemberRole = 'owner' | 'member'
 
@@ -141,6 +142,8 @@ export interface MeetingNotes {
   user_id: string
   bottom_line_summary: string | null
   intent: string | null
+  interaction_type: InteractionType | null
+  interaction_rationale: string | null
   raw_notes: string | null
   docx_url: string | null
   is_edited: boolean

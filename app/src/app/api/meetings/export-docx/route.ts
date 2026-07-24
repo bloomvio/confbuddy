@@ -265,6 +265,15 @@ export async function POST(req: NextRequest) {
         bodyText(notes.intent ?? 'Not specified'),
         spacer(),
 
+        // ── Interaction Type ───────────────────────────────────────────────
+        h2('Interaction Type'),
+        bodyText(
+          notes.interaction_type === 'meaningful_interaction' ? 'Meaningful Interaction' : 'Interaction',
+          { bold: true },
+        ),
+        ...(notes.interaction_rationale ? [bodyText(notes.interaction_rationale, { muted: true })] : []),
+        spacer(),
+
         // ── Action Items ──────────────────────────────────────────────────────
         h2('Action Items'),
         actionTable,

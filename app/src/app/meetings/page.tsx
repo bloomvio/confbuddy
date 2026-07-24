@@ -10,7 +10,7 @@ export default async function MeetingsPage() {
 
   const { data: meetings } = await supabase
     .from('cb_meetings')
-    .select('*, contact:cb_contacts(full_name, company, title)')
+    .select('*, contact:cb_contacts(full_name, company, title), notes:cb_meeting_notes(interaction_type)')
     .order('meeting_date', { ascending: false })
 
   return (
@@ -39,7 +39,10 @@ export default async function MeetingsPage() {
           status: string
           conference_name?: string
           contact?: { full_name: string; company: string; title: string }
-        }) => (
+          notes?: { interaction_type: string | null }[]
+        }) => {
+          const interactionType = m.notes?.[0]?.interaction_type
+          return (
           <Link key={m.id} href={`/meetings/${m.id}`}
             className="card flex items-center gap-3 hover:border-indigo-200 transition-colors">
             <div className="w-11 h-11 bg-purple-100 rounded-full flex items-center justify-center text-xl flex-shrink-0">
@@ -53,6 +56,15 @@ export default async function MeetingsPage() {
               {m.conference_name && (
                 <p className="text-xs text-gray-400 truncate">{m.conference_name}</p>
               )}
+              {interactionType && (
+                <span className={`inline-block mt-1 text-xs px-2 py-0.5 rounded-full font-medium ${
+                  interactionType === 'meaningful_interaction'
+                    ? 'bg-emerald-100 text-emerald-700'
+                    : 'bg-slate-100 text-slate-600'
+                }`}>
+                  {interactionType === 'meaningful_interaction' ? '⭐ Meaningful' : '💬 Interaction'}
+                </span>
+              )}
             </div>
             <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${
               m.status === 'notes_ready' ? 'bg-green-100 text-green-700' :
@@ -61,7 +73,8 @@ export default async function MeetingsPage() {
               'bg-gray-100 text-gray-500'
             }`}>{m.status.replace('_', ' ')}</span>
           </Link>
-        ))}
+          )
+        })}
       </div>
     </div>
     </AppShell>

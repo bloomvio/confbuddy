@@ -40,10 +40,17 @@ CONTACT INFO:
 MEETING TRANSCRIPT / NOTES:
 ${transcript}
 
+Also classify this meeting into exactly one of two interaction types:
+- "meaningful_interaction": the conversation went beyond surface-level. It qualifies if ANY of these are present: the rep learned real details about what the prospect/customer is doing in their IT landscape (systems, tools, architecture, integrations, pain points, initiatives); a decision maker (or someone who influences the buying decision) was in the loop; there was a clear intent to set up a follow-up meeting or next step; or a genuine business need, budget, or timeline was discussed.
+- "interaction": a brief, generic, or surface-level exchange — introductions, small talk, booth chatter, or a hand-off with none of the depth above.
+When in doubt, and none of the "meaningful_interaction" signals are clearly present, classify it as "interaction".
+
 Produce this JSON (no markdown, just JSON):
 {
   "bottom_line_summary": "3-5 bullet points as a single string, each bullet starting with •",
   "intent": "1-2 sentences on what this meeting was about and what was achieved",
+  "interaction_type": "interaction" or "meaningful_interaction",
+  "interaction_rationale": "1 sentence explaining why this classification was chosen, citing the specific signal(s)",
   "raw_notes": "Clean, lightly edited version of the transcript preserving key details",
   "action_items": [
     { "description": "...", "owner": "...", "due_date": "YYYY-MM-DD or null" }
@@ -63,6 +70,10 @@ Produce this JSON (no markdown, just JSON):
 
     const notes = JSON.parse(jsonMatch[0])
 
+    // Normalize the interaction classification; default to 'interaction'
+    const interactionType =
+      notes.interaction_type === 'meaningful_interaction' ? 'meaningful_interaction' : 'interaction'
+
     // Save meeting notes
     const { data: savedNotes } = await supabase
       .from('cb_meeting_notes')
@@ -71,6 +82,8 @@ Produce this JSON (no markdown, just JSON):
         user_id: meeting.user_id,
         bottom_line_summary: notes.bottom_line_summary,
         intent: notes.intent,
+        interaction_type: interactionType,
+        interaction_rationale: notes.interaction_rationale ?? null,
         raw_notes: notes.raw_notes,
         generated_at: new Date().toISOString(),
       })

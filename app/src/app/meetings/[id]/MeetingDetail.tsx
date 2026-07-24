@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { Meeting, MeetingNotes, ActionItem, MeetingOutcome } from '@/types/database'
+import { Meeting, MeetingNotes, ActionItem, MeetingOutcome, InteractionType } from '@/types/database'
 
 interface Props {
   meeting: Meeting & { contact?: { full_name: string; company: string; title: string } }
@@ -20,6 +20,15 @@ const OUTCOMES: { value: MeetingOutcome; label: string; bg: string; text: string
 
 function outcomeStyle(o?: string | null) {
   return OUTCOMES.find(x => x.value === o) ?? null
+}
+
+const INTERACTIONS: Record<InteractionType, { label: string; bg: string; text: string }> = {
+  meaningful_interaction: { label: '⭐ Meaningful Interaction', bg: 'bg-emerald-100', text: 'text-emerald-700' },
+  interaction:            { label: '💬 Interaction',           bg: 'bg-slate-100',   text: 'text-slate-600'  },
+}
+
+function interactionStyle(t?: string | null) {
+  return t && t in INTERACTIONS ? INTERACTIONS[t as InteractionType] : null
 }
 
 export default function MeetingDetail({ meeting, notes, actionItems }: Props) {
@@ -102,6 +111,7 @@ export default function MeetingDetail({ meeting, notes, actionItems }: Props) {
 
   const isProcessing = meeting.status === 'processing' || meeting.transcription_status === 'processing'
   const outcomeInfo = outcomeStyle(outcome)
+  const interactionInfo = interactionStyle(notes?.interaction_type)
 
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
@@ -114,6 +124,12 @@ export default function MeetingDetail({ meeting, notes, actionItems }: Props) {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
+          {/* Auto interaction classification */}
+          {interactionInfo && (
+            <span className={`text-xs font-medium px-2 py-1 rounded-full ${interactionInfo.bg} ${interactionInfo.text}`}>
+              {interactionInfo.label}
+            </span>
+          )}
           {/* Outcome badge — tap to change */}
           <button
             onClick={() => setShowOutcomePicker(true)}
@@ -173,6 +189,17 @@ export default function MeetingDetail({ meeting, notes, actionItems }: Props) {
 
             {activeTab === 'summary' && (
               <div className="space-y-4">
+                {interactionInfo && (
+                  <div className="card">
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Interaction Type</p>
+                    <span className={`inline-block text-sm font-semibold px-3 py-1 rounded-full ${interactionInfo.bg} ${interactionInfo.text}`}>
+                      {interactionInfo.label}
+                    </span>
+                    {notes.interaction_rationale && (
+                      <p className="text-sm text-gray-500 mt-2">{notes.interaction_rationale}</p>
+                    )}
+                  </div>
+                )}
                 <div className="card">
                   <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Bottom Line Summary</p>
                   <div className="text-sm text-gray-700 whitespace-pre-line">{notes.bottom_line_summary}</div>
