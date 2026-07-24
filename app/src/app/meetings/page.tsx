@@ -3,15 +3,55 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import AppShell from '@/components/ui/AppShell'
 
-export default async function MeetingsPage() {
+type Meeting = {
+  id: string
+  meeting_date: string
+  status: string
+  conference_name?: string
+  contact?: { full_name: string; company: string; title: string }
+  notes?: { interaction_type: string | null }[]
+}
+
+const FILTERS = [
+  { key: 'all',         label: 'All' },
+  { key: 'meaningful',  label: '⭐ Meaningful' },
+  { key: 'interaction', label: '💬 Interaction' },
+] as const
+
+type FilterKey = (typeof FILTERS)[number]['key']
+
+export default async function MeetingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ type?: string }>
+}) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/auth/login')
+
+  const { type } = await searchParams
+  const filter: FilterKey =
+    type === 'meaningful' || type === 'interaction' ? type : 'all'
 
   const { data: meetings } = await supabase
     .from('cb_meetings')
     .select('*, contact:cb_contacts(full_name, company, title), notes:cb_meeting_notes(interaction_type)')
     .order('meeting_date', { ascending: false })
+
+  const all: Meeting[] = meetings ?? []
+  const meaningfulCount = all.filter(m => m.notes?.[0]?.interaction_type === 'meaningful_interaction').length
+  const interactionCount = all.filter(m => m.notes?.[0]?.interaction_type === 'interaction').length
+  const counts: Record<FilterKey, number> = {
+    all: all.length,
+    meaningful: meaningfulCount,
+    interaction: interactionCount,
+  }
+
+  const filtered = all.filter(m => {
+    if (filter === 'all') return true
+    const t = m.notes?.[0]?.interaction_type
+    return filter === 'meaningful' ? t === 'meaningful_interaction' : t === 'interaction'
+  })
 
   return (
     <AppShell>
@@ -21,8 +61,29 @@ export default async function MeetingsPage() {
         <Link href="/meetings/new" className="btn-primary text-sm py-2 px-4">+ Record</Link>
       </header>
 
+      {/* Interaction filter */}
+      {all.length > 0 && (
+        <div className="bg-white border-b border-gray-100 px-4 py-2 overflow-x-auto">
+          <div className="max-w-lg mx-auto flex gap-2">
+            {FILTERS.map(f => (
+              <Link
+                key={f.key}
+                href={f.key === 'all' ? '/meetings' : `/meetings?type=${f.key}`}
+                className={`text-xs font-medium px-3 py-1.5 rounded-full whitespace-nowrap transition-colors ${
+                  filter === f.key
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                {f.label} <span className="opacity-70">{counts[f.key]}</span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="px-4 py-5 max-w-lg mx-auto space-y-2">
-        {meetings?.length === 0 && (
+        {all.length === 0 && (
           <div className="card text-center py-12">
             <div className="text-4xl mb-3">🎙️</div>
             <p className="font-medium text-gray-700">No meetings yet</p>
@@ -33,14 +94,17 @@ export default async function MeetingsPage() {
           </div>
         )}
 
-        {meetings?.map((m: {
-          id: string
-          meeting_date: string
-          status: string
-          conference_name?: string
-          contact?: { full_name: string; company: string; title: string }
-          notes?: { interaction_type: string | null }[]
-        }) => {
+        {all.length > 0 && filtered.length === 0 && (
+          <div className="card text-center py-12">
+            <div className="text-4xl mb-3">🔍</div>
+            <p className="font-medium text-gray-700">No matching meetings</p>
+            <p className="text-sm text-gray-400 mt-1">
+              No meetings classified as {filter === 'meaningful' ? 'Meaningful Interaction' : 'Interaction'} yet
+            </p>
+          </div>
+        )}
+
+        {filtered.map((m: Meeting) => {
           const interactionType = m.notes?.[0]?.interaction_type
           return (
           <Link key={m.id} href={`/meetings/${m.id}`}
